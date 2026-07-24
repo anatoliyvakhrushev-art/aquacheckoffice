@@ -916,7 +916,10 @@ async function goRegister(){
   state.mode = 'register';
   state.regUserId = null;
   state.regUserSearch = '';
-  state.regUserOpen = false;
+  // список подсказок открыт СРАЗУ (не по фокусу) — иначе onfocus вызывает render() ровно
+  // в момент, когда телефон ещё занят обработкой самого события фокуса/появления клавиатуры,
+  // и первые же нажатия клавиш на этом поле теряются (см. onFocusOverride ниже).
+  state.regUserOpen = true;
   state.regLogin = '';
   state.regPassword = '';
   state.regPasswordConfirm = '';
@@ -1021,7 +1024,8 @@ function renderRegisterScreen(){
         selectedLabel: selected ? regUserLabel(selected) : '',
         placeholder:'Начните вводить фамилию…',
         rows,
-        onInputOverride: 'refreshRegUserSearch(this.value)'
+        onInputOverride: 'refreshRegUserSearch(this.value)',
+        onFocusOverride: ''
       })}
       ${state.unclaimedUsers.length===0 ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:6px;">Если список пуст — все уже зарегистрированы, либо ваш профиль ещё не добавлен администратором.</div>` : ''}
       ${selected ? `
@@ -1207,7 +1211,10 @@ function matchesSearch(text, search){
 // точечного патча (см. patchComboList) отдельных полей, которым этого мало (см. cfg.onInputOverride ниже).
 function comboRowsHtml(rows, setterFn, searchField, openField, valueField){
   const q = (s) => `'${String(s).replace(/'/g,"\\'")}'`;
-  const onPick = (val) => `${setterFn}(${q(searchField)}, '');${setterFn}(${q(openField)}, false);${setterFn}(${q(valueField)}, ${q(val)})`;
+  // document.activeElement.blur() ПЕРЕД сеттерами — иначе для «тихих» полей (data-quiet-render,
+  // см. render()) фокус в момент onmousedown ещё формально в самом поле ввода, и все три вызова
+  // сеттера ниже были бы молча проигнорированы (экран не обновился бы после выбора из списка).
+  const onPick = (val) => `document.activeElement&&document.activeElement.blur();${setterFn}(${q(searchField)}, '');${setterFn}(${q(openField)}, false);${setterFn}(${q(valueField)}, ${q(val)})`;
   return rows.length===0 ? `<div style="padding:8px 10px;font-size:12px;color:var(--text-muted);">Ничего не найдено</div>` : rows.map(r=>`
     <div style="padding:8px 10px;font-size:12.5px;cursor:pointer;${r.active?'background:var(--neutral-bg);font-weight:600;':''}" onmousedown="${onPick(r.value)}">${r.label}</div>
   `).join('');
@@ -1226,7 +1233,7 @@ function patchComboList(id, rows, setterFn, searchField, openField, valueField){
 }
 
 function renderCombo(cfg){
-  const { id, setterFn, searchField, openField, valueField, isOpen, searchValue, selectedLabel, placeholder, rows, onInputOverride } = cfg;
+  const { id, setterFn, searchField, openField, valueField, isOpen, searchValue, selectedLabel, placeholder, rows, onInputOverride, onFocusOverride } = cfg;
   const q = (s) => `'${String(s).replace(/'/g,"\\'")}'`;
   // Важно: вызываем сеттер ОДИН раз за нажатие клавиши (не два). Список и так уже открыт —
   // его открывает onfocus при входе в поле, до начала набора текста. Второй вызов здесь
@@ -1238,7 +1245,10 @@ function renderCombo(cfg){
   // слишком часто на телефоне (тяжёлый экран + фоновая подгрузка данных): такие поля вместо
   // общего render() точечно патчат только список подсказок, см. patchComboList().
   const onInput = onInputOverride || `${setterFn}(${q(searchField)}, this.value)`;
-  const onFocus = `${setterFn}(${q(openField)}, true)`;
+  // onFocusOverride: '' — для полей, у которых список подсказок и так уже открыт заранее
+  // (см. goRegister()), так что вызывать по фокусу render() незачем — это лишь источник той же
+  // самой гонки с первыми нажатиями клавиш, от которой защищает onInputOverride.
+  const onFocus = onFocusOverride!==undefined ? onFocusOverride : `${setterFn}(${q(openField)}, true)`;
   // При каждой перерисовке поле физически удаляется и создаётся заново — в этот момент
   // браузер кратковременно снимает с него фокус (событие blur), даже если тут же после
   // пересборки мы возвращаем фокус на новое поле с тем же id. Поэтому нельзя слепо закрывать
@@ -1249,6 +1259,7 @@ function renderCombo(cfg){
   return `
     <div style="position:relative;width:100%;box-sizing:border-box;">
       <input type="text" id="${id}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="width:100%;box-sizing:border-box;"
+        ${onInputOverride ? 'data-quiet-render="1"' : ''}
         value="${(isOpen ? searchValue : (selectedLabel||'')).replace(/"/g,'&quot;')}"
         placeholder="${placeholder}"
         oninput="${onInput}"
@@ -3936,6 +3947,16 @@ function render(){
   }
 
   if(isLiveTextEdit){
+    // Поля с data-quiet-render (см. renderCombo/onInputOverride) сами следят за собой во время
+    // набора текста через точечный patchComboList() — им общий render() вообще не нужен, пока
+    // фокус не уйдёт из поля (тогда сработает обычный onblur → setterFn(...,false) → обычный
+    // render(), уже без debounce, т.к. фокуса в поле больше не будет). Поэтому посторонний
+    // render() (например, от фоновой подгрузки данных с сервера), прилетевший прямо во время
+    // набора в такое поле, просто отбрасываем — даже отложенная на 150мс перерисовка иногда
+    // успевала пересоздать поле прямо во время набора кириллицы и сбить курсор (стабильно
+    // ловилось на iOS Safari в поле «Найдите себя в списке»).
+    if(active.dataset && active.dataset.quietRender==='1') return;
+
     clearTimeout(liveEditDebounce);
     liveEditDebounce = setTimeout(()=>{ liveEditDebounce = null; scheduleRenderFrame(); }, 150);
     return;
