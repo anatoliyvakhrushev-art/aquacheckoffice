@@ -3917,11 +3917,23 @@ function renderShellFull(inner){
 // гарантированно происходят только между нажатиями, а не посреди них.
 let renderScheduled = false;
 let liveEditDebounce = null;
+// id поля, которое было в фокусе на момент ПРЕДЫДУЩЕЙ завершённой перерисовки (см. performRender).
+let lastRenderedFocusId = null;
 function render(){
   const root = document.getElementById('app');
   const active = document.activeElement;
   const isLiveTextEdit = !!(active && root && root.contains(active) && active.id &&
     (active.tagName==='INPUT' || active.tagName==='TEXTAREA'));
+
+  // Если поле ТОЛЬКО ЧТО получило фокус (на прошлой перерисовке в фокусе было что-то другое
+  // или не было ничего) — печатать в него ещё не успели, поэтому откладывать перерисовку
+  // незачем: рисуем сразу же. Иначе, например, открытие списка подсказок комбобокса (onfocus)
+  // откладывается на 150мс и сталкивается с первыми же нажатиями клавиш — именно так на
+  // iPhone/Safari терялись первые буквы в поле «Найдите себя в списке».
+  if(isLiveTextEdit && active.id!==lastRenderedFocusId){
+    scheduleRenderFrame();
+    return;
+  }
 
   if(isLiveTextEdit){
     clearTimeout(liveEditDebounce);
@@ -3982,6 +3994,10 @@ function performRender(){
     const el = document.getElementById(id);
     if(el) el.scrollTop = scrollMap[id];
   });
+
+  // запоминаем, что именно сейчас в фокусе — см. lastRenderedFocusId в render()
+  const focusedNow = document.activeElement;
+  lastRenderedFocusId = (focusedNow && focusedNow.id && root.contains(focusedNow)) ? focusedNow.id : null;
 }
 
 render();
