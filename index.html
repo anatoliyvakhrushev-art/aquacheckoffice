@@ -715,6 +715,13 @@ const DEMO_SEED_TEMPLATES = JSON.parse(JSON.stringify(state.templates));
 function restoreDemoData(){
   state.points = JSON.parse(JSON.stringify(DEMO_SEED_POINTS));
   state.templates = JSON.parse(JSON.stringify(DEMO_SEED_TEMPLATES));
+  // users/violations/inspections/plannedInspections подменяются реальными данными на время
+  // рабочего входа (см. finishLiveLogin) — возвращаем демо-снимок, иначе после выхода из
+  // живого сеанса демо-показ остался бы засорён настоящими данными пилота.
+  state.users = JSON.parse(JSON.stringify(DEMO_SEED_USERS));
+  state.violations = JSON.parse(JSON.stringify(DEMO_SEED_VIOLATIONS));
+  state.inspections = JSON.parse(JSON.stringify(DEMO_SEED_INSPECTIONS));
+  state.plannedInspections = JSON.parse(JSON.stringify(DEMO_SEED_PLANNED_INSPECTIONS));
   state.live = false;
   state.guestLive = false;
 }
@@ -846,10 +853,18 @@ async function finishLiveLogin(uid){
   state.plannedInspections = (planRows||[]).map(mapPlanFromDb);
   state.appUser = appUser;
   state.myPointId = appUser.point_id || (appUser.point_ids && appUser.point_ids[0]) || null;
-  const roleMap = {'Оператор':'operator','Управляющий':'manager','Терр. директор':'director','Маркетолог':'director','Аудитор':'director'};
-  state.previewRole = roleMap[appUser.role] || 'manager';
-  state.mode = 'preview';
   state.live = true;
+
+  if(appUser.role==='Оператор'){
+    // оператор работает с рабочего телефона на точке — мобильный киоск-экран
+    state.previewRole = 'operator';
+    state.mode = 'preview';
+  } else {
+    // Управляющий/Терр. директор/Маркетолог/Аудитор — офисные роли: полноценный кабинет
+    // управления (тот же экран, что в демо-показе), только с настоящими данными сети.
+    state.section = 'analytics';
+    state.mode = 'console';
+  }
 }
 
 async function doLogin(){
@@ -1195,6 +1210,14 @@ function persistGuestsToStorage(){
     if(Array.isArray(savedGuests)) state.knownGuests = savedGuests;
   } catch(e){ /* игнорируем повреждённые данные */ }
 })();
+
+// снимок демо-данных пользователей/нарушений/проверок/планирования — СНИМАЕТСЯ ПОСЛЕ
+// применения localStorage-оверлея выше (сохраняет ручные демо-правки), но ДО того, как
+// рабочий вход (finishLiveLogin) когда-либо подменит их реальными данными. См. restoreDemoData().
+const DEMO_SEED_USERS = JSON.parse(JSON.stringify(state.users));
+const DEMO_SEED_VIOLATIONS = JSON.parse(JSON.stringify(state.violations));
+const DEMO_SEED_INSPECTIONS = JSON.parse(JSON.stringify(state.inspections));
+const DEMO_SEED_PLANNED_INSPECTIONS = JSON.parse(JSON.stringify(state.plannedInspections));
 
 function matchesSearch(text, search){
   if(!search) return true;
@@ -3887,6 +3910,12 @@ function renderShellFull(inner){
         </div>
         <div class="subtitle">Сервис управления проверками</div>
         <nav id="roleNav">${renderConsoleNav()}</nav>
+        ${state.live ? `
+        <div class="nav-note" style="display:block;">
+          ${state.appUser ? `Вошли как: <b style="color:#f0f0f0;">${state.appUser.name}</b><br>${state.appUser.role}<br><br>` : ''}
+          <a onclick="doLogout()">← Выйти из рабочего режима</a>
+        </div>
+        ` : `
         <div class="nav-note">Кликабельный демо-макет на тестовых данных — без реальной базы и сервера.</div>
         <div class="console-demo-links">
           <b style="color:#f0f0f0;">Демо-просмотр телефонных экранов:</b><br>
@@ -3902,6 +3931,7 @@ function renderShellFull(inner){
           <a onclick="goRegister()">Регистрация сотрудника (первый вход)</a><br>
           <a onclick="openLiveGuestChecklist()">Гостевая проверка — реальная</a>
         </div>
+        `}
       </aside>
       <main class="content">${inner}</main>
     </div>
