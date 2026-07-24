@@ -810,8 +810,10 @@ function backToConsoleFromLogin(){
 }
 
 function setAuthField(field, value){
+  // без render(): поле уже показывает введённый текст само (нативный input), а полная
+  // перерисовка экрана на каждое нажатие клавиши на телефоне пересоздаёт этот <input> —
+  // из-за этого виртуальная клавиатура сбрасывается и часть букв теряется/не печатается.
   state['auth'+field] = value;
-  render();
 }
 
 // Общий шаг после успешной аутентификации (обычный вход ИЛИ только что созданная
@@ -903,6 +905,13 @@ function setRegField(field, value){
   render();
 }
 
+// для логина/пароля render() не нужен (см. setAuthField) — эти поля ни на что в разметке
+// не влияют, пока форма не отправлена, а полная перерисовка на каждую клавишу на телефоне
+// пересоздаёт input и сбрасывает виртуальную клавиатуру (часть букв теряется).
+function setRegFieldQuiet(field, value){
+  state['reg'+field] = value;
+}
+
 async function goRegister(){
   state.mode = 'register';
   state.regUserId = null;
@@ -946,10 +955,25 @@ async function doRegister(){
   if(password!==state.regPasswordConfirm){ state.regError = 'Пароли не совпадают.'; render(); return; }
   const loginValue = (state.regLogin||'').trim();
   let email;
-  if(chosen.email && chosen.email.includes('@')) email = chosen.email;
-  else if(loginValue.includes('@')) email = loginValue;
-  else if(loginValue) email = loginValue + '@aquagizer.internal';
-  else { state.regError = 'Придумайте логин.'; render(); return; }
+  if(chosen.email && chosen.email.includes('@')){
+    email = chosen.email;
+  } else if(!loginValue){
+    state.regError = 'Придумайте логин.'; render(); return;
+  } else if(loginValue.includes('@')){
+    // ввели сразу полный email — проверяем его собственный формат
+    if(!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(loginValue)){
+      state.regError = 'Введите корректный email.'; render(); return;
+    }
+    email = loginValue;
+  } else {
+    // обычный логин (без @) превращается в email вида логин@aquagizer.internal —
+    // такой адрес обязан состоять из латиницы: кириллица или пробелы Supabase Auth
+    // отклоняет с непонятной для сотрудника ошибкой "invalid format"
+    if(!/^[A-Za-z0-9._-]+$/.test(loginValue)){
+      state.regError = 'Логин — только латинские буквы, цифры, точка, дефис или подчёркивание, без кириллицы и пробелов. Например: ivanov'; render(); return;
+    }
+    email = loginValue + '@aquagizer.internal';
+  }
 
   state.regBusy = true; state.regError=''; render();
   try{
@@ -1006,16 +1030,16 @@ function renderRegisterScreen(){
         ` : `
           <div style="margin-top:14px;">
             <label style="font-size:11px;color:var(--text-muted);">Придумайте логин</label>
-            <input id="regLoginInput" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" style="width:100%;margin:2px 0;box-sizing:border-box;" placeholder="ivanov" value="${state.regLogin.replace(/"/g,'&quot;')}" oninput="setRegField('Login', this.value)">
+            <input id="regLoginInput" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" style="width:100%;margin:2px 0;box-sizing:border-box;" placeholder="ivanov" value="${state.regLogin.replace(/"/g,'&quot;')}" oninput="setRegFieldQuiet('Login', this.value)">
           </div>
         `}
         <div style="margin-top:12px;">
           <label style="font-size:11px;color:var(--text-muted);">Пароль</label>
-          <input id="regPasswordInput" type="password" style="width:100%;margin:2px 0;box-sizing:border-box;" value="${state.regPassword.replace(/"/g,'&quot;')}" oninput="setRegField('Password', this.value)">
+          <input id="regPasswordInput" type="password" style="width:100%;margin:2px 0;box-sizing:border-box;" value="${state.regPassword.replace(/"/g,'&quot;')}" oninput="setRegFieldQuiet('Password', this.value)">
         </div>
         <div style="margin-top:12px;">
           <label style="font-size:11px;color:var(--text-muted);">Повторите пароль</label>
-          <input id="regPasswordConfirmInput" type="password" style="width:100%;margin:2px 0;box-sizing:border-box;" value="${state.regPasswordConfirm.replace(/"/g,'&quot;')}" oninput="setRegField('PasswordConfirm', this.value)">
+          <input id="regPasswordConfirmInput" type="password" style="width:100%;margin:2px 0;box-sizing:border-box;" value="${state.regPasswordConfirm.replace(/"/g,'&quot;')}" oninput="setRegFieldQuiet('PasswordConfirm', this.value)">
         </div>
       ` : ''}
       ${state.regError ? `<div style="font-size:12px;color:var(--danger);margin:12px 0;">${state.regError}</div>` : ''}
