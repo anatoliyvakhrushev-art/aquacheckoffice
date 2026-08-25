@@ -1016,7 +1016,8 @@ function saveChecklistDraft(){
     // временные флаги загрузки — после перезагрузки страницы blob-ссылка мертва, и картинка
     // выглядела бы «битой»; превью восстанавливается по photoPath (см. restorePhotoPreviews)
     answers: checklistDraft.answers.map(a=>({
-      answer: a.answer, photo: !!a.photo, comment: a.comment || '', photoPath: a.photoPath || null
+      answer: a.answer, photo: !!a.photo, comment: a.comment || '',
+      photos: (a.photos || []).filter(p=>p && p.path).map(p=>({ path: p.path }))
     }))
   };
   writeAllSavedDrafts(map);
@@ -1655,23 +1656,28 @@ function renderOperator(){
 // Пустые ответы под состав чек-листа, либо восстановленные из незаконченного черновика.
 function answersForChecklist(items, templateId, pointId, planId){
   const saved = savedDraftFor(templateId, pointId, planId, items);
-  if(saved) return saved.answers.map(a=>({
-    answer: a.answer===undefined?null:a.answer, photo: !!a.photo, comment: a.comment||'', photoPath: a.photoPath||null
-  }));
-  return items.map(()=>({answer:null, photo:false, comment:'', photoPath:null}));
+  if(saved) return saved.answers.map(a=>{
+    // photoPath — формат черновиков до появления нескольких фото на пункт; переносим в список,
+    // чтобы уже начатые на объекте чек-листы не потеряли приложенный снимок
+    const photos = Array.isArray(a.photos) ? a.photos.filter(p=>p && p.path).map(p=>({path:p.path, preview:null}))
+      : (a.photoPath ? [{path:a.photoPath, preview:null}] : []);
+    return { answer: a.answer===undefined?null:a.answer, photo: photos.length>0 || !!a.photo, comment: a.comment||'', photos };
+  });
+  return items.map(()=>({answer:null, photo:false, comment:'', photos:[]}));
 }
 
 // Превью для уже загруженных снимков после возврата к черновику: сама картинка лежит в
 // хранилище, ссылку на неё нужно запросить заново (она подписанная и живёт ограниченное время).
 async function restorePhotoPreviews(){
   if(!checklistDraft || !state.live || !sb) return;
-  const pending = checklistDraft.answers.filter(a=>a.photoPath && !a.photoPreview);
+  const pending = [];
+  checklistDraft.answers.forEach(a=> (a.photos||[]).forEach(p=>{ if(p.path && !p.preview) pending.push(p); }));
   if(pending.length===0) return;
-  for(const a of pending){
+  for(const p of pending){
     try{
-      const { data } = await sb.storage.from('inspection-photos').createSignedUrl(a.photoPath, 3600);
-      if(data && data.signedUrl) a.photoPreview = data.signedUrl;
-    } catch(e){ /* без превью пункт всё равно помечен как «фото приложено» */ }
+      const { data } = await sb.storage.from('inspection-photos').createSignedUrl(p.path, 3600);
+      if(data && data.signedUrl) p.preview = data.signedUrl;
+    } catch(e){ /* без превью снимок всё равно отмечен как приложенный */ }
   }
   render();
 }
@@ -1745,44 +1751,52 @@ function shrinkImageFile(file){
   });
 }
 
-// Загрузка снимка в хранилище. Путь включает объект и дату — чтобы фото можно было найти
-// глазами в Storage, не поднимая базу.
-async function uploadChecklistPhoto(idx, input){
-  const file = input && input.files && input.files[0];
-  if(!file) return;
+// Загрузка снимков в хранилище. К одному пункту можно приложить несколько фото — на объекте
+// обычно нужен и общий вид, и деталь (крупно сам дефект). Путь включает объект и дату, чтобы
+// файл можно было найти глазами в Storage, не поднимая базу.
+async function uploadChecklistPhotos(idx, input){
+  const files = (input && input.files) ? [...input.files] : [];
+  if(files.length===0) return;
   const a = checklistDraft.answers[idx];
+  a.photos = a.photos || [];
   a.photoError = '';
   a.photoUploading = true;
   render();
-  try{
-    const blob = await shrinkImageFile(file);
-    if(state.live && sb){
-      const pointId = draftPointId();
-      const stamp = new Date().toISOString().replace(/[:.]/g,'-');
-      const path = `point-${pointId}/${todayStr()}/${stamp}-item${idx}.jpg`;
-      const { error } = await sbRetry(()=> sb.storage.from('inspection-photos').upload(path, blob, { contentType:'image/jpeg', upsert:false }));
-      if(error) throw error;
-      a.photoPath = path;
+  const failures = [];
+  for(let n=0; n<files.length; n++){
+    try{
+      const blob = await shrinkImageFile(files[n]);
+      let path = null;
+      if(state.live && sb){
+        const pointId = draftPointId();
+        const stamp = new Date().toISOString().replace(/[:.]/g,'-');
+        path = `point-${pointId}/${todayStr()}/${stamp}-item${idx}-${a.photos.length+1}.jpg`;
+        const { error } = await sbRetry(()=> sb.storage.from('inspection-photos').upload(path, blob, { contentType:'image/jpeg', upsert:false }));
+        if(error) throw error;
+      }
+      // превью из локального файла — показывается сразу, без обращения к серверу
+      a.photos.push({ path, preview: URL.createObjectURL(blob) });
+      a.photo = true;
+    } catch(e){
+      failures.push((e && e.message) || String(e));
     }
-    // локальное превью — сразу, без обращения к серверу (в демо это единственный носитель фото)
-    if(a.photoPreview) { try{ URL.revokeObjectURL(a.photoPreview); }catch(e){} }
-    a.photoPreview = URL.createObjectURL(blob);
-    a.photo = true;
-    a.photoUploading = false;
-    saveChecklistDraft();
-  } catch(e){
-    a.photoUploading = false;
-    a.photoError = 'Не удалось приложить фото: ' + ((e && e.message) || e) + '. Попробуйте ещё раз.';
   }
+  a.photoUploading = false;
+  if(failures.length){
+    a.photoError = (failures.length===files.length ? 'Не удалось приложить фото: ' : 'Часть снимков не загрузилась: ') + failures[0] + '. Попробуйте ещё раз.';
+  }
+  if(input) input.value = ''; // иначе повторный выбор того же файла не вызовет onchange
+  saveChecklistDraft();
   render();
 }
 
-function removeChecklistPhoto(idx){
+function removeChecklistPhoto(idx, photoIdx){
   const a = checklistDraft.answers[idx];
-  if(a.photoPreview){ try{ URL.revokeObjectURL(a.photoPreview); }catch(e){} }
-  a.photoPreview = null;
-  a.photoPath = null;
-  a.photo = false;
+  const list = a.photos || [];
+  const gone = list[photoIdx];
+  if(gone && gone.preview){ try{ URL.revokeObjectURL(gone.preview); }catch(e){} }
+  a.photos = list.filter((_,i)=>i!==photoIdx);
+  a.photo = a.photos.length>0;
   a.photoError = '';
   saveChecklistDraft();
   render();
@@ -1863,33 +1877,32 @@ function renderChecklistForm(){
               <button class="toggle-btn no ${a.answer==='no'?'active':''}" onclick="setAnswer(${idx},'no')">Нет</button>
             </div>
           </div>
-          ${photoRequired ? `
+          ${photoRequired ? (()=>{
+            const photos = a.photos || [];
+            return `
             <div style="margin-top:10px;">
-              ${a.photoUploading ? `
-                <div class="photo-btn">⏳ Загружаем снимок…</div>
-              ` : a.photo ? `
-                <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;">
-                  ${a.photoPreview ? `<img src="${a.photoPreview}" alt="Приложенное фото" style="width:110px;height:110px;object-fit:cover;border-radius:8px;border:1px solid var(--border);">` : ''}
-                  <div>
-                    <div class="photo-btn attached" style="cursor:default;">📷 Фото приложено</div>
-                    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">
-                      <label class="btn btn-secondary btn-sm" style="cursor:pointer;">
-                        Заменить
-                        <input type="file" accept="image/*" capture="environment" style="display:none;" onchange="uploadChecklistPhoto(${idx}, this)">
-                      </label>
-                      <button class="btn btn-secondary btn-sm" onclick="removeChecklistPhoto(${idx})">Убрать</button>
+              ${photos.length>0 ? `
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                  ${photos.map((ph,pi)=>`
+                    <div style="position:relative;">
+                      ${ph.preview
+                        ? `<img src="${ph.preview}" alt="Фото ${pi+1}" style="width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid var(--success);display:block;">`
+                        : `<div style="width:96px;height:96px;border-radius:8px;border:1px solid var(--success);display:flex;align-items:center;justify-content:center;font-size:22px;background:var(--success-bg);">📷</div>`}
+                      <button onclick="removeChecklistPhoto(${idx}, ${pi})" title="Убрать этот снимок"
+                        style="position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:none;background:var(--danger);color:#fff;font-size:13px;line-height:1;cursor:pointer;">×</button>
                     </div>
-                  </div>
+                  `).join('')}
                 </div>
-              ` : `
-                <label class="photo-btn" style="cursor:pointer;">
-                  📷 Сделать снимок или выбрать из галереи${a.answer==='no' && !it.photo ? ' (обязательно при ответе «Нет»)' : ''}
-                  <input type="file" accept="image/*" capture="environment" style="display:none;" onchange="uploadChecklistPhoto(${idx}, this)">
+              ` : ''}
+              ${a.photoUploading ? `<div class="photo-btn">⏳ Загружаем снимки…</div>` : `
+                <label class="photo-btn ${photos.length>0?'attached':''}" style="cursor:pointer;">
+                  📷 ${photos.length>0 ? 'Добавить ещё фото ('+photos.length+' шт.)' : 'Приложить фото'}${photos.length===0 && a.answer==='no' && !it.photo ? ' — обязательно при ответе «Нет»' : ''}
+                  <input type="file" accept="image/*" multiple style="display:none;" onchange="uploadChecklistPhotos(${idx}, this)">
                 </label>
               `}
               ${a.photoError ? `<div style="margin-top:6px;font-size:12px;color:var(--danger);">${a.photoError}</div>` : ''}
             </div>
-          ` : ''}
+          `;})() : ''}
           ${commentRequired ? `
             <div style="margin-top:8px;">
               <textarea id="opComment${idx}" rows="2" style="width:100%;box-sizing:border-box;border:1px solid ${a.comment&&a.comment.trim()?'var(--border)':'var(--danger)'};border-radius:7px;padding:6px 9px;font-size:12.5px;font-family:inherit;" placeholder="Опишите, что не так (обязательно)" oninput="setComment(${idx}, this.value)">${a.comment.replace(/</g,'&lt;')}</textarea>
@@ -1921,7 +1934,7 @@ async function submitChecklist(){
     text:it.text, critical:it.critical, photo:it.photo, weight:itemWeight(it),
     answer:checklistDraft.answers[idx].answer,
     comment:checklistDraft.answers[idx].comment||'',
-    photoPath: checklistDraft.answers[idx].photoPath || null   // путь снимка в хранилище
+    photos: (checklistDraft.answers[idx].photos || []).filter(p=>p && p.path).map(p=>({ path: p.path }))
   }));
 
   if(state.live && sb){
@@ -2515,7 +2528,14 @@ function renderInspectionDetail(insp){
                 <span class="badge ${it.answer==='yes'?'badge-success':'badge-danger'}">${it.answer==='yes'?'Да':'Нет'}</span>
               </div>
               ${it.answer==='no' && it.comment ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);background:var(--bg);border-radius:7px;padding:6px 9px;">💬 ${it.comment}</div>` : ''}
-              ${it.photoPath ? `<div style="margin-top:8px;"><button class="btn btn-secondary btn-sm" onclick="openInspectionPhoto('${it.photoPath.replace(/'/g,"\\'")}')">📷 Посмотреть фото</button></div>` : ''}
+              ${(()=>{
+                // photoPath — записи, сделанные до появления нескольких фото на пункт
+                const shots = Array.isArray(it.photos) ? it.photos.filter(p=>p && p.path) : (it.photoPath ? [{path:it.photoPath}] : []);
+                if(shots.length===0) return '';
+                return `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">${shots.map((p,pi)=>
+                  `<button class="btn btn-secondary btn-sm" onclick="openInspectionPhoto('${p.path.replace(/'/g,"\\'")}')">📷 Фото${shots.length>1?' '+(pi+1):''}</button>`
+                ).join('')}</div>`;
+              })()}
             </div>
           `;}).join('')
       }
