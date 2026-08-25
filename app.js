@@ -377,6 +377,13 @@ state.appUser = null;      // строка app_users вошедшего сотр
 state.checklistBusy = false; // идёт отправка чек-листа оператора — блокирует повторное нажатие «Отправить»
 state.guestBusy = false;     // идёт отправка гостевой проверки — блокирует повторное нажатие «Отправить»
 
+// ---- смена собственного пароля (доступна вошедшему сотруднику) ----
+state.pwNew = '';
+state.pwConfirm = '';
+state.pwBusy = false;
+state.pwError = '';
+state.pwDone = false;
+
 // ---- состояние самостоятельной регистрации сотрудника ----
 state.unclaimedUsers = [];   // сотрудники из app_users, у которых ещё нет логина (auth_user_id = null)
 state.regPointsById = {};    // id объекта -> название (чтобы подписать пункты списка)
@@ -731,6 +738,81 @@ function renderRegisterScreen(){
         <a onclick="goLiveLogin()" style="font-size:12px;">Уже есть логин? Войти</a><br>
         ${PILOT_ONLY ? `` : `<a onclick="backToConsoleFromLogin()" style="font-size:12px;">← Назад к демо-кабинету</a>`}
       </div>
+    </div>
+  `;
+}
+
+// ---------- Смена собственного пароля ----------
+// Работает по активной сессии: старый пароль не требуется, потому что личность уже подтверждена
+// входом. Это и есть штатный путь для «не помню пароль, но на одном устройстве ещё залогинен» —
+// задал новый и заходишь с телефона. Сброс пароля ЧУЖОМУ сотруднику так сделать нельзя: для
+// этого нужен сервисный ключ Supabase, которому нет места в коде страницы.
+function goChangePassword(){
+  state.mode = 'password';
+  state.pwNew = '';
+  state.pwConfirm = '';
+  state.pwError = '';
+  state.pwDone = false;
+  render();
+}
+
+// без render() на каждую клавишу — иначе на телефоне пересоздаётся поле и сбрасывается
+// клавиатура (та же причина, что у setAuthField)
+function setPwField(field, value){ state['pw'+field] = value; }
+
+function backFromPassword(){
+  state.mode = (state.live && state.appUser && state.appUser.role==='Оператор') ? 'preview' : 'console';
+  render();
+}
+
+async function doChangePassword(){
+  if(!sb || !state.live){ state.pwError = 'Смена пароля доступна только в рабочем режиме.'; render(); return; }
+  const pw = state.pwNew || '';
+  if(pw.length < 6){ state.pwError = 'Пароль должен быть не короче 6 символов.'; render(); return; }
+  if(pw !== state.pwConfirm){ state.pwError = 'Пароли не совпадают.'; render(); return; }
+  state.pwBusy = true; state.pwError = ''; render();
+  try{
+    const { error } = await sb.auth.updateUser({ password: pw });
+    if(error) throw error;
+    state.pwBusy = false;
+    state.pwDone = true;
+    state.pwNew = ''; state.pwConfirm = '';
+    render();
+  } catch(e){
+    state.pwBusy = false;
+    state.pwError = (e && e.message) ? humanizeAuthError(e.message) : 'Не удалось сменить пароль.';
+    render();
+  }
+}
+
+function renderPasswordScreen(){
+  const login = state.appUser ? (state.appUser.email || '') : '';
+  return `
+    <div style="max-width:380px;margin:50px auto;padding:28px;border:1px solid var(--border);border-radius:12px;background:#fff;">
+      <div class="brand-mark" style="justify-content:center;margin-bottom:4px;">
+        <span class="brand-icon">💧</span>
+        <span class="brand-word"><span class="brand-part-a">Aqua</span><span class="brand-part-b">CheckOffice</span></span>
+      </div>
+      <div style="text-align:center;font-size:12.5px;color:var(--text-muted);margin-bottom:20px;">Смена пароля</div>
+      ${state.pwDone ? `
+        <div style="text-align:center;padding:10px 0 4px;">
+          <div style="font-size:30px;margin-bottom:8px;">✅</div>
+          <div style="font-weight:700;margin-bottom:6px;">Пароль изменён</div>
+          <div style="font-size:12.5px;color:var(--text-muted);">Заходите с телефона: логин <b>${login}</b> и новый пароль.</div>
+        </div>
+        <button class="btn" style="width:100%;margin-top:16px;" onclick="backFromPassword()">Вернуться в сервис</button>
+      ` : `
+        ${login ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Ваш логин: <b>${login}</b></div>` : ''}
+        <label style="font-size:11px;color:var(--text-muted);">Новый пароль</label>
+        <input id="pwNewInput" type="password" style="width:100%;margin:2px 0 12px;box-sizing:border-box;" oninput="setPwField('New', this.value)">
+        <label style="font-size:11px;color:var(--text-muted);">Повторите новый пароль</label>
+        <input id="pwConfirmInput" type="password" style="width:100%;margin:2px 0 16px;box-sizing:border-box;" oninput="setPwField('Confirm', this.value)">
+        ${state.pwError ? `<div style="font-size:12px;color:var(--danger);margin-bottom:12px;">${state.pwError}</div>` : ''}
+        <button class="btn" style="width:100%;" ${state.pwBusy?'disabled':''} onclick="doChangePassword()">${state.pwBusy?'Меняем…':'Сохранить новый пароль'}</button>
+        <div style="text-align:center;margin-top:14px;">
+          <a onclick="backFromPassword()" style="font-size:12px;">← Назад</a>
+        </div>
+      `}
     </div>
   `;
 }
@@ -4004,7 +4086,7 @@ function renderFixPanels(){
 
 function renderPreviewShell(inner, role){
   const exitLink = state.live
-    ? `<a onclick="doLogout()">← Выйти из рабочего режима</a>`
+    ? `<a onclick="goChangePassword()">Сменить пароль</a> · <a onclick="doLogout()">← Выйти из рабочего режима</a>`
     : state.guestLive
       ? `<a onclick="exitPreview()">← Завершить (это была реальная проверка)</a>`
       : `<a onclick="exitPreview()">← Выйти из демо-просмотра (в кабинет управления)</a>`;
@@ -4055,6 +4137,7 @@ function renderShellFull(inner){
         ${state.live ? `
         <div class="nav-note" style="display:block;">
           ${state.appUser ? `Вошли как: <b style="color:#f0f0f0;">${state.appUser.name}</b><br>${state.appUser.role}<br><br>` : ''}
+          <a onclick="goChangePassword()">Сменить пароль</a><br><br>
           <a onclick="doLogout()">← Выйти из рабочего режима</a>
         </div>
         ` : PILOT_ONLY ? `` : `
@@ -4163,6 +4246,8 @@ function performRender(){
 
   if(state.mode==='login'){
     root.innerHTML = renderLoginScreen();
+  } else if(state.mode==='password'){
+    root.innerHTML = renderPasswordScreen();
   } else if(state.mode==='register'){
     root.innerHTML = renderRegisterScreen();
   } else if(state.mode==='preview'){
