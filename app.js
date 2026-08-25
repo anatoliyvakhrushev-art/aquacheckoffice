@@ -874,6 +874,78 @@ function persistGuestsToStorage(){
   } catch(e){ /* игнорируем повреждённые данные */ }
 })();
 
+// ---------- Незаконченные чек-листы (черновики) ----------
+// Заполнение большого чек-листа на объекте легко прервать: закрыл браузер, разрядился телефон,
+// система выгрузила вкладку из памяти, нужно срочно переключиться в другой раздел. Поэтому
+// ответы пишутся в localStorage после каждого нажатия и восстанавливаются при возврате.
+// Черновики хранятся ПО ОДНОМУ НА ЗАДАЧУ (ключ по плану, либо по шаблону+объекту), а не один
+// общий: за день проверяющий проезжает несколько точек и может прерваться на каждой.
+const CHECKLIST_DRAFTS_STORAGE_KEY = 'checkoffice_checklist_drafts_v1';
+
+// Черновик привязан к сотруднику: рабочий телефон точки один, а заходить под ним могут разные
+// люди — чужой незаконченный чек-лист показывать нельзя.
+function currentDraftUserKey(){
+  if(!state.live) return 'demo';
+  return (state.appUser && (state.appUser.auth_user_id || state.appUser.id)) ? String(state.appUser.auth_user_id || state.appUser.id) : 'unknown';
+}
+
+function draftKeyFor(templateId, pointId, planId){
+  return planId ? ('plan:'+planId) : ('tpl:'+templateId+':pt:'+pointId);
+}
+
+function loadAllSavedDrafts(){
+  try{
+    const raw = JSON.parse(localStorage.getItem(CHECKLIST_DRAFTS_STORAGE_KEY) || '{}');
+    return (raw && typeof raw === 'object') ? raw : {};
+  } catch(e){ return {}; }
+}
+
+function writeAllSavedDrafts(map){
+  try{ localStorage.setItem(CHECKLIST_DRAFTS_STORAGE_KEY, JSON.stringify(map)); }
+  catch(e){ /* хранилище недоступно/переполнено — заполнение продолжится, просто без страховки */ }
+}
+
+// Возвращает сохранённый черновик для этой задачи, если он принадлежит текущему сотруднику
+// и его состав совпадает с текущим шаблоном (шаблон могли отредактировать — тогда старые
+// ответы уже не соответствуют пунктам, и черновик лучше не подсовывать).
+function savedDraftFor(templateId, pointId, planId, expectedItems){
+  const d = loadAllSavedDrafts()[draftKeyFor(templateId, pointId, planId)];
+  if(!d) return null;
+  if(d.userKey !== currentDraftUserKey()) return null;
+  if(!Array.isArray(d.answers)) return null;
+  if(expectedItems && d.answers.length !== expectedItems.length) return null;
+  return d;
+}
+
+function saveChecklistDraft(){
+  if(!checklistDraft) return;
+  const map = loadAllSavedDrafts();
+  map[draftKeyFor(checklistDraft.templateId, checklistDraft.pointId, checklistDraft.planId)] = {
+    userKey: currentDraftUserKey(),
+    savedAt: new Date().toISOString(),
+    templateId: checklistDraft.templateId,
+    pointId: checklistDraft.pointId,
+    planId: checklistDraft.planId || null,
+    answers: checklistDraft.answers
+  };
+  writeAllSavedDrafts(map);
+}
+
+function clearSavedDraft(templateId, pointId, planId){
+  const map = loadAllSavedDrafts();
+  delete map[draftKeyFor(templateId, pointId, planId)];
+  writeAllSavedDrafts(map);
+}
+
+// Сколько уже отвечено в сохранённом черновике — для подписи кнопки «Продолжить заполнение».
+function savedDraftProgress(templateId, pointId, planId){
+  const d = savedDraftFor(templateId, pointId, planId, null);
+  if(!d) return null;
+  const answered = d.answers.filter(a=>a && a.answer!==null && a.answer!==undefined).length;
+  if(answered === 0) return null;
+  return { answered, total: d.answers.length, savedAt: d.savedAt };
+}
+
 // снимок демо-данных пользователей/нарушений/проверок/планирования — СНИМАЕТСЯ ПОСЛЕ
 // применения localStorage-оверлея выше (сохраняет ручные демо-правки), но ДО того, как
 // рабочий вход (finishLiveLogin) когда-либо подменит их реальными данными. См. restoreDemoData().
@@ -1363,7 +1435,12 @@ function renderOperator(){
         </div>
         <div style="margin-top:12px;">
           ${canFill
-            ? `<button class="btn btn-sm" onclick="startChecklist(${t.id})">${st.state==='overdue' ? 'Заполнить (с опозданием)' : 'Заполнить сейчас'}</button>`
+            ? (()=>{
+                const progress = savedDraftProgress(t.id, state.myPointId, null);
+                return `<button class="btn btn-sm" onclick="startChecklist(${t.id})">${progress
+                  ? 'Продолжить заполнение ('+progress.answered+' из '+progress.total+')'
+                  : (st.state==='overdue' ? 'Заполнить (с опозданием)' : 'Заполнить сейчас')}</button>`;
+              })()
             : st.state==='upcoming'
               ? `<button class="btn btn-sm" disabled>Пока недоступно</button>`
               : ''}
@@ -1404,6 +1481,13 @@ function renderOperator(){
   `;
 }
 
+// Пустые ответы под состав чек-листа, либо восстановленные из незаконченного черновика.
+function answersForChecklist(items, templateId, pointId, planId){
+  const saved = savedDraftFor(templateId, pointId, planId, items);
+  if(saved) return saved.answers.map(a=>({ answer: a.answer===undefined?null:a.answer, photo: !!a.photo, comment: a.comment||'' }));
+  return items.map(()=>({answer:null, photo:false, comment:''}));
+}
+
 function startChecklist(templateId){
   const t = templateById(templateId);
   const items = buildChecklistItems(t, pointById(state.myPointId));
@@ -1412,7 +1496,7 @@ function startChecklist(templateId){
     pointId: state.myPointId,
     planId: null,
     items,
-    answers: items.map(()=>({answer:null, photo:false, comment:''}))
+    answers: answersForChecklist(items, templateId, state.myPointId, null)
   };
   render();
 }
@@ -1433,7 +1517,7 @@ function startPlanChecklist(planId){
     pointId: p.id,
     planId: plan.id,
     items,
-    answers: items.map(()=>({answer:null, photo:false, comment:''}))
+    answers: answersForChecklist(items, t.id, p.id, plan.id)
   };
   render();
 }
@@ -1442,29 +1526,41 @@ function draftPointId(){ return (checklistDraft && checklistDraft.pointId) || st
 
 function setAnswer(idx, val){
   checklistDraft.answers[idx].answer = val;
+  saveChecklistDraft();
   render();
 }
 function togglePhoto(idx){
   checklistDraft.answers[idx].photo = !checklistDraft.answers[idx].photo;
+  saveChecklistDraft();
   render();
 }
 function setComment(idx, value){
   checklistDraft.answers[idx].comment = value;
+  saveChecklistDraft();
   render();
 }
-// Прерывание заполнения. Если уже есть ответы — спрашиваем подтверждение (черновик нигде не
-// сохраняется, уход со экрана его теряет), если пусто — выходим молча.
-// Возвращает false, если пользователь решил остаться — тогда вызывающий код ничего не меняет.
+// Прерывание заполнения: ответы уже сохранены в localStorage (см. saveChecklistDraft), поэтому
+// уход с экрана ничего не теряет — к чек-листу можно вернуться кнопкой «Продолжить заполнение».
+// Спрашивать подтверждение незачем.
 function abandonChecklist(){
   if(!checklistDraft) return true;
-  const answered = checklistDraft.answers.filter(a=>a.answer!==null).length;
-  if(answered>0 && !confirm('Заполнено пунктов: '+answered+'. Если прервать, ответы не сохранятся. Прервать заполнение?')) return false;
+  saveChecklistDraft();
   checklistDraft = null;
   return true;
 }
 
 function cancelChecklist(){
-  if(!abandonChecklist()) return;
+  abandonChecklist();
+  render();
+}
+
+// Явный сброс: удаляет сохранённые ответы и начинает этот чек-лист с чистого листа.
+function restartChecklist(){
+  if(!checklistDraft) return;
+  const answered = checklistDraft.answers.filter(a=>a.answer!==null).length;
+  if(answered>0 && !confirm('Удалить '+answered+' уже отвеченных пунктов и начать чек-лист заново?')) return;
+  clearSavedDraft(checklistDraft.templateId, checklistDraft.pointId, checklistDraft.planId);
+  checklistDraft.answers = checklistDraft.items.map(()=>({answer:null, photo:false, comment:''}));
   render();
 }
 
@@ -1478,11 +1574,11 @@ function renderChecklistForm(){
   const missingComments = checklistDraft.answers.some(a=> a.answer==='no' && !(a.comment && a.comment.trim()));
 
   return `
-    ${state.mode==='console' ? `<div style="margin-bottom:10px;"><a onclick="cancelChecklist()" style="font-size:12.5px;cursor:pointer;">← Прервать заполнение и вернуться в кабинет</a></div>` : ''}
+    ${state.mode==='console' ? `<div style="margin-bottom:10px;"><a onclick="cancelChecklist()" style="font-size:12.5px;cursor:pointer;">← Прервать и вернуться в кабинет (ответы сохранятся)</a></div>` : ''}
     <div class="page-title">${t.name}</div>
     <div class="page-subtitle">
       ${(pointById(draftPointId())||{}).name||''} · заполняется на месте, с фото и геометкой<br>
-      Отвечено ${checklistDraft.answers.filter(a=>a.answer!==null).length} из ${items.length}
+      Отвечено ${checklistDraft.answers.filter(a=>a.answer!==null).length} из ${items.length} · ответы сохраняются автоматически, можно прерваться и вернуться
     </div>
     <div class="card">
       <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">Если отвечаете «Нет» — обязательно прикрепите фото и опишите проблему в комментарии.</div>
@@ -1516,7 +1612,8 @@ function renderChecklistForm(){
       }).join('')}
       <div style="margin-top:16px;display:flex;gap:8px;">
         <button class="btn" ${(!allAnswered||missingPhotos||missingComments||state.checklistBusy)?'disabled':''} onclick="submitChecklist()">${state.checklistBusy?'Сохраняем…':'Отправить проверку'}</button>
-        <button class="btn btn-secondary" ${state.checklistBusy?'disabled':''} onclick="cancelChecklist()">Отмена</button>
+        <button class="btn btn-secondary" ${state.checklistBusy?'disabled':''} onclick="cancelChecklist()" title="Ответы сохранятся, можно вернуться позже">Прервать</button>
+        <button class="btn btn-secondary" ${state.checklistBusy?'disabled':''} onclick="restartChecklist()" title="Удалить заполненное и начать этот чек-лист заново">Начать заново</button>
       </div>
       ${missingPhotos ? `<div style="margin-top:10px;font-size:12px;color:var(--danger)">Прикрепите фото там, где оно обязательно.</div>` : ''}
       ${missingComments ? `<div style="margin-top:6px;font-size:12px;color:var(--danger)">Опишите комментарием каждый пункт с ответом «Нет».</div>` : ''}
@@ -1563,6 +1660,7 @@ async function submitChecklist(){
       if(planId) await closePlanAfterChecklist(planId, inspection, score);
 
       state.operatorTasksDone.push({templateId:t.id, doneAt: minutesToTime(currentClockMinutes())});
+      clearSavedDraft(t.id, pointId, planId); // проверка ушла в базу — черновик больше не нужен
       checklistDraft = null;
       state.checklistBusy = false;
       showBanner(`Проверка сохранена в общей базе. Итоговый балл: ${score}%. ${total-passed>0 ? (total-passed)+' нарушение(й) зафиксировано автоматически.' : 'Нарушений нет.'}`);
@@ -1595,6 +1693,7 @@ async function submitChecklist(){
   if(planId) closePlanLocallyAfterChecklist(planId, localInspection, score);
 
   state.operatorTasksDone.push({templateId:t.id, doneAt: state.demoNow});
+  clearSavedDraft(t.id, pointId, planId);
   checklistDraft = null;
   showBanner(`Проверка отправлена. Итоговый балл: ${score}%. ${total-passed>0 ? (total-passed)+' нарушение(й) зафиксировано автоматически.' : 'Нарушений нет.'}`);
 }
@@ -2499,8 +2598,11 @@ function renderAdminPlanning(){
               ${plan.note ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">«${plan.note}»</div>` : ''}
             </div>
             <span class="badge ${info.cls}">${info.label}</span>
-            ${plan.status==='запланирована' ? `
-              <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="startPlanChecklist(${plan.id})">Пройти чек-лист</button>
+            ${plan.status==='запланирована' ? (()=>{
+              const progress = savedDraftProgress(plan.templateId, plan.pointId, plan.id);
+              return `
+              <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="startPlanChecklist(${plan.id})">${progress ? 'Продолжить заполнение ('+progress.answered+' из '+progress.total+')' : 'Пройти чек-лист'}</button>`;
+            })() + `
               ${canCloseWithoutChecklist() ? `<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" title="Внести только итоговый балл, без прохождения пунктов" onclick="completePlanInspection(${plan.id})">Внести балл вручную</button>` : ''}
               <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="cancelPlan(${plan.id})">Отменить</button>
             ` : `
