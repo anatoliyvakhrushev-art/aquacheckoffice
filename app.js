@@ -1801,8 +1801,24 @@ function removeChecklistPhoto(idx, photoIdx){
   saveChecklistDraft();
   render();
 }
+// Комментарий печатают на телефоне, а экран чек-листа тяжёлый (десятки пунктов, миниатюры фото).
+// Поэтому здесь НЕ вызываются ни render(), ни запись черновика на каждый символ: перерисовка
+// пересоздаёт <textarea> прямо во время набора (часть нажатий теряется — та же беда, что была
+// в поиске сотрудника на входе), а сериализация черновика на каждую букву добавляет задержку.
+// Поле само показывает введённый текст; экран обновляется, когда из поля уходит фокус (onblur),
+// а черновик сохраняется с задержкой после того, как перестали печатать.
+let commentSaveTimer = null;
 function setComment(idx, value){
   checklistDraft.answers[idx].comment = value;
+  clearTimeout(commentSaveTimer);
+  commentSaveTimer = setTimeout(()=>{ commentSaveTimer = null; saveChecklistDraft(); }, 700);
+}
+
+// Уход из поля комментария: досохраняем и перерисовываем — обновятся рамка поля, счётчик
+// отвеченного и доступность кнопки «Отправить проверку».
+function commitComment(){
+  clearTimeout(commentSaveTimer);
+  commentSaveTimer = null;
   saveChecklistDraft();
   render();
 }
@@ -1905,13 +1921,13 @@ function renderChecklistForm(){
           `;})() : ''}
           ${commentRequired ? `
             <div style="margin-top:8px;">
-              <textarea id="opComment${idx}" rows="2" style="width:100%;box-sizing:border-box;border:1px solid ${a.comment&&a.comment.trim()?'var(--border)':'var(--danger)'};border-radius:7px;padding:6px 9px;font-size:12.5px;font-family:inherit;" placeholder="Опишите, что не так (обязательно)" oninput="setComment(${idx}, this.value)">${a.comment.replace(/</g,'&lt;')}</textarea>
+              <textarea id="opComment${idx}" rows="2" data-quiet-render="1" style="width:100%;box-sizing:border-box;border:1px solid ${a.comment&&a.comment.trim()?'var(--border)':'var(--danger)'};border-radius:7px;padding:6px 9px;font-size:12.5px;font-family:inherit;" placeholder="Опишите, что не так (обязательно)" oninput="setComment(${idx}, this.value)" onblur="commitComment()">${a.comment.replace(/</g,'&lt;')}</textarea>
             </div>
           ` : ''}
         </div>`;
       }).join('')}
       <div style="margin-top:16px;display:flex;gap:8px;">
-        <button class="btn" ${(!allAnswered||missingPhotos||missingComments||photoUploading||state.checklistBusy)?'disabled':''} onclick="submitChecklist()">${state.checklistBusy?'Сохраняем…':(photoUploading?'Ждём загрузку фото…':'Отправить проверку')}</button>
+        <button class="btn" ${(photoUploading||state.checklistBusy)?'disabled':''} onclick="submitChecklist()">${state.checklistBusy?'Сохраняем…':(photoUploading?'Ждём загрузку фото…':'Отправить проверку')}</button>
         <button class="btn btn-secondary" ${state.checklistBusy?'disabled':''} onclick="cancelChecklist()" title="Ответы сохранятся, можно вернуться позже">Прервать</button>
         <button class="btn btn-secondary" ${state.checklistBusy?'disabled':''} onclick="restartChecklist()" title="Удалить заполненное и начать этот чек-лист заново">Начать заново</button>
       </div>
@@ -1923,6 +1939,26 @@ function renderChecklistForm(){
 
 async function submitChecklist(){
   if(state.checklistBusy) return; // защита от повторного нажатия «Отправить» пока идёт сохранение
+
+  // Проверяем полноту здесь, а не блокировкой кнопки: комментарий печатают «тихо», без
+  // перерисовки экрана (см. setComment), поэтому заблокированная кнопка ожила бы только после
+  // ухода из поля — и первый тап по ней пропадал бы впустую. Заодно можно назвать номер пункта.
+  {
+    const its = checklistDraft.items;
+    const ans = checklistDraft.answers;
+    if(ans.some(a=>a.photoUploading)){ showBanner('Дождитесь загрузки фото.'); return; }
+    const noAnswer = ans.findIndex(a=>a.answer===null);
+    if(noAnswer>=0){
+      const left = ans.filter(a=>a.answer===null).length;
+      showBanner('Не отвечено пунктов: '+left+'. Первый из них — №'+(noAnswer+1)+'.');
+      return;
+    }
+    const noPhoto = its.findIndex((it,idx)=> (it.photo || ans[idx].answer==='no') && !(ans[idx].photos && ans[idx].photos.length));
+    if(noPhoto>=0){ showBanner('Пункт №'+(noPhoto+1)+': нужно приложить фото.'); return; }
+    const noComment = ans.findIndex(a=> a.answer==='no' && !(a.comment && a.comment.trim()));
+    if(noComment>=0){ showBanner('Пункт №'+(noComment+1)+': опишите проблему в комментарии.'); return; }
+  }
+
   const t = templateById(checklistDraft.templateId);
   const pointId = draftPointId();          // у назначенной проверки объект берётся из плана, а не из «моей» точки
   const planId = checklistDraft.planId || null;
@@ -4137,7 +4173,7 @@ function renderGuest(){
             ${photoRequired ? `<div class="photo-btn ${state.guestAnswers['photo'+idx]?'attached':''}" onclick="toggleGuestPhoto(${idx})">📷 ${state.guestAnswers['photo'+idx]?'Фото прикреплено':'Прикрепить фото'}${ans==='no' && !it.photo ? ' (обязательно при ответе «Нет»)' : ''}</div>` : ''}
             ${commentRequired ? `
               <div style="margin-top:8px;">
-                <textarea id="guestComment${idx}" rows="2" style="width:100%;box-sizing:border-box;border:1px solid ${comment.trim()?'var(--border)':'var(--danger)'};border-radius:7px;padding:6px 9px;font-size:12.5px;font-family:inherit;" placeholder="Опишите, что не так (обязательно)" oninput="setGuestComment(${idx}, this.value)">${comment.replace(/</g,'&lt;')}</textarea>
+                <textarea id="guestComment${idx}" rows="2" data-quiet-render="1" style="width:100%;box-sizing:border-box;border:1px solid ${comment.trim()?'var(--border)':'var(--danger)'};border-radius:7px;padding:6px 9px;font-size:12.5px;font-family:inherit;" placeholder="Опишите, что не так (обязательно)" oninput="setGuestComment(${idx}, this.value)" onblur="commitGuestComment()">${comment.replace(/</g,'&lt;')}</textarea>
               </div>
             ` : ''}
           </div>
@@ -4158,10 +4194,11 @@ function toggleGuestPhoto(idx){
   state.guestAnswers['photo'+idx] = !state.guestAnswers['photo'+idx];
   render();
 }
+// см. setComment: на телефоне полная перерисовка во время набора съедает нажатия
 function setGuestComment(idx, value){
   state.guestAnswers['comment'+idx] = value;
-  render();
 }
+function commitGuestComment(){ render(); }
 
 async function submitGuest(){
   if(state.guestBusy) return; // защита от повторного нажатия «Отправить» пока идёт сохранение
