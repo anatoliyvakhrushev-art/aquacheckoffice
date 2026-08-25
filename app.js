@@ -516,6 +516,9 @@ async function finishLiveLogin(uid){
   state.myPointId = appUser.point_id || (appUser.point_ids && appUser.point_ids[0]) || null;
   state.live = true;
 
+  // незаконченные чек-листы этого сотрудника с других устройств
+  mergeCloudDraftsIntoLocal();
+
   if(appUser.role==='Оператор'){
     // оператор работает с рабочего телефона на точке — мобильный киоск-экран
     state.previewRole = 'operator';
@@ -919,8 +922,9 @@ function savedDraftFor(templateId, pointId, planId, expectedItems){
 
 function saveChecklistDraft(){
   if(!checklistDraft) return;
+  const key = draftKeyFor(checklistDraft.templateId, checklistDraft.pointId, checklistDraft.planId);
   const map = loadAllSavedDrafts();
-  map[draftKeyFor(checklistDraft.templateId, checklistDraft.pointId, checklistDraft.planId)] = {
+  map[key] = {
     userKey: currentDraftUserKey(),
     savedAt: new Date().toISOString(),
     templateId: checklistDraft.templateId,
@@ -929,12 +933,92 @@ function saveChecklistDraft(){
     answers: checklistDraft.answers
   };
   writeAllSavedDrafts(map);
+  scheduleCloudDraftPush(key); // в общую базу — фоном, см. ниже
 }
 
 function clearSavedDraft(templateId, pointId, planId){
+  const key = draftKeyFor(templateId, pointId, planId);
   const map = loadAllSavedDrafts();
-  delete map[draftKeyFor(templateId, pointId, planId)];
+  delete map[key];
   writeAllSavedDrafts(map);
+  deleteCloudDraft(key);
+}
+
+// ---------- Синхронизация черновиков с общей базой (доступ с любого устройства) ----------
+// Локальное хранилище остаётся первичным: на объекте связь бывает плохой, и заполнение не
+// должно от неё зависеть. В базу черновик уходит фоном с задержкой — иначе каждое нажатие
+// «Да/Нет» превращалось бы в сетевой запрос (на чек-листе из 74 пунктов это 74 запроса).
+const CLOUD_DRAFT_PUSH_DELAY_MS = 4000;
+let cloudDraftPushTimer = null;
+let cloudDraftPushQueue = new Set();
+
+function cloudDraftsAvailable(){
+  return !!(state.live && sb && state.appUser && state.appUser.id);
+}
+
+function scheduleCloudDraftPush(key){
+  if(!cloudDraftsAvailable()) return;
+  cloudDraftPushQueue.add(key);
+  clearTimeout(cloudDraftPushTimer);
+  cloudDraftPushTimer = setTimeout(flushCloudDraftPush, CLOUD_DRAFT_PUSH_DELAY_MS);
+}
+
+// Отправка накопленных черновиков. Ошибки намеренно проглатываются: облако здесь —
+// удобство (продолжить на другом устройстве), а не источник правды. Нет сети — заполнение
+// продолжается по локальной копии, синхронизация случится при следующем сохранении или входе.
+async function flushCloudDraftPush(){
+  if(!cloudDraftsAvailable()){ cloudDraftPushQueue.clear(); return; }
+  const keys = [...cloudDraftPushQueue];
+  cloudDraftPushQueue.clear();
+  const map = loadAllSavedDrafts();
+  const rows = keys.map(k=>map[k]).filter(Boolean).map(d=>({
+    app_user_id: state.appUser.id,
+    draft_key: draftKeyFor(d.templateId, d.pointId, d.planId),
+    template_id: d.templateId,
+    point_id: d.pointId,
+    plan_id: d.planId,
+    answers: d.answers,
+    updated_at: d.savedAt
+  }));
+  if(rows.length===0) return;
+  try{ await sb.from('checklist_drafts').upsert(rows, { onConflict: 'app_user_id,draft_key' }); }
+  catch(e){ /* останется в локальной копии, синхронизируется позже */ }
+}
+
+async function deleteCloudDraft(key){
+  if(!cloudDraftsAvailable()) return;
+  try{ await sb.from('checklist_drafts').delete().eq('app_user_id', state.appUser.id).eq('draft_key', key); }
+  catch(e){ /* не критично: локально уже удалён, в базе подчистится при следующей отправке */ }
+}
+
+// Слияние облачных черновиков с локальными при входе. Конфликт (заполняли на двух устройствах)
+// решается по времени последнего изменения — побеждает более свежая версия.
+async function mergeCloudDraftsIntoLocal(){
+  if(!cloudDraftsAvailable()) return;
+  try{
+    const { data, error } = await sb.from('checklist_drafts').select('*').eq('app_user_id', state.appUser.id);
+    if(error || !data) return;
+    const map = loadAllSavedDrafts();
+    let changed = false;
+    data.forEach(row=>{
+      const local = map[row.draft_key];
+      const cloudTime = row.updated_at || '';
+      if(!local || String(local.savedAt||'') < String(cloudTime)){
+        map[row.draft_key] = {
+          userKey: currentDraftUserKey(),
+          savedAt: cloudTime,
+          templateId: row.template_id,
+          pointId: row.point_id,
+          planId: row.plan_id,
+          answers: row.answers || []
+        };
+        changed = true;
+      } else if(local && String(local.savedAt||'') > String(cloudTime)){
+        scheduleCloudDraftPush(row.draft_key); // локальная свежее — вернём её в базу
+      }
+    });
+    if(changed) writeAllSavedDrafts(map);
+  } catch(e){ /* без сети просто работаем с локальными черновиками */ }
 }
 
 // Сколько уже отвечено в сохранённом черновике — для подписи кнопки «Продолжить заполнение».
@@ -1551,8 +1635,15 @@ function abandonChecklist(){
 
 function cancelChecklist(){
   abandonChecklist();
+  flushCloudDraftPush(); // уходим с экрана — не ждём таймер, отправляем сразу
   render();
 }
+
+// Закрытие вкладки/уход со страницы: досылаем то, что ещё не успело уйти по таймеру.
+window.addEventListener('pagehide', ()=>{ try{ flushCloudDraftPush(); }catch(e){} });
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='hidden'){ try{ flushCloudDraftPush(); }catch(e){} }
+});
 
 // Явный сброс: удаляет сохранённые ответы и начинает этот чек-лист с чистого листа.
 function restartChecklist(){
