@@ -1083,7 +1083,7 @@ function buildChecklistItems(template, point){
   const items = [];
   const posts = point.posts || 1;
   for(let i=1;i<=posts;i++){
-    template.perPostItems.forEach(pi=> items.push({text:'Пост '+i+' — '+pi.text, critical:pi.critical, photo:pi.photo}));
+    template.perPostItems.forEach(pi=> items.push({text:'Пост '+i+' — '+pi.text, critical:pi.critical, photo:pi.photo, weight:pi.weight}));
   }
   template.siteItems.forEach(si=> items.push(si));
   return items;
@@ -1093,6 +1093,33 @@ function buildChecklistItems(template, point){
 
 function pointById(id){ return state.points.find(p=>p.id===id); }
 function templateById(id){ return state.templates.find(t=>t.id===id); }
+
+// Вес пункта чек-листа (требование ТЗ п.3.2). Пункт без явного веса считается за 1, поэтому
+// старые шаблоны, где веса не заданы, продолжают считаться как простой процент выполненных
+// пунктов — их балл не меняется. Там, где веса заданы (импорт из действующего сервиса:
+// например «Итоговая оценка мойки» весит 5 против 1 у обычного пункта), балл становится
+// взвешенным и совпадает с привычным для проверяющих.
+function itemWeight(it){
+  const w = Number(it && it.weight);
+  return (isFinite(w) && w > 0) ? w : 1;
+}
+
+// Итоговый балл проверки: доля веса пройденных пунктов от веса всех отвеченных.
+// answers — массив либо объектов {answer}, либо самих значений 'yes'/'no'.
+function computeChecklistScore(items, answers){
+  const answerOf = (idx)=>{
+    const a = answers[idx];
+    return (a && typeof a === 'object') ? a.answer : a;
+  };
+  let totalWeight = 0, passedWeight = 0;
+  items.forEach((it, idx)=>{
+    const w = itemWeight(it);
+    totalWeight += w;
+    if(answerOf(idx) === 'yes') passedWeight += w;
+  });
+  if(totalWeight === 0) return 0;
+  return Math.round((passedWeight / totalWeight) * 100);
+}
 
 // Официальный рейтинг объекта = простое среднее по проверкам управляющего и тер.директора
 // за последние 30 дней (самооценка оператора и гостевые проверки в расчёт не идут — см. обсуждение
@@ -1454,6 +1481,7 @@ function renderChecklistForm(){
               <div class="tags">
                 ${it.critical?'<span class="tag" style="color:var(--danger)">критический пункт</span>':''}
                 ${it.photo?'<span class="tag">фото обязательно</span>':''}
+                ${itemWeight(it)>1?`<span class="tag" style="color:var(--primary)">вес ×${itemWeight(it)}</span>`:''}
               </div>
             </div>
             <div class="answer-toggle">
@@ -1487,8 +1515,8 @@ async function submitChecklist(){
   const items = checklistDraft.items;
   const total = items.length;
   const passed = checklistDraft.answers.filter(a=>a.answer==='yes').length;
-  const score = Math.round((passed/total)*100);
-  const itemsPayload = items.map((it,idx)=>({ text:it.text, critical:it.critical, photo:it.photo, answer:checklistDraft.answers[idx].answer, comment:checklistDraft.answers[idx].comment||'' }));
+  const score = computeChecklistScore(items, checklistDraft.answers); // с учётом весов пунктов
+  const itemsPayload = items.map((it,idx)=>({ text:it.text, critical:it.critical, photo:it.photo, weight:itemWeight(it), answer:checklistDraft.answers[idx].answer, comment:checklistDraft.answers[idx].comment||'' }));
 
   if(state.live && sb){
     state.checklistBusy = true; render();
@@ -3695,10 +3723,10 @@ async function submitGuest(){
   if(!point || !t) return;
   const items = buildChecklistItems(t, point) || t.items || [];
   const passed = items.filter((it,idx)=>state.guestAnswers[idx]==='yes').length;
-  const score = Math.round((passed/items.length)*100);
+  const score = computeChecklistScore(items, items.map((it,idx)=>state.guestAnswers[idx])); // с учётом весов
   const name = state.guestName.trim();
   const contact = state.guestContact.trim();
-  const itemsPayload = items.map((it,idx)=>({ text:it.text, critical:it.critical, photo:it.photo, answer:state.guestAnswers[idx], comment: state.guestAnswers['comment'+idx] || '' }));
+  const itemsPayload = items.map((it,idx)=>({ text:it.text, critical:it.critical, photo:it.photo, weight:itemWeight(it), answer:state.guestAnswers[idx], comment: state.guestAnswers['comment'+idx] || '' }));
 
   if(state.guestLive && sb){
     state.guestBusy = true; render();
