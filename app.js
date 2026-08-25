@@ -1202,23 +1202,41 @@ const NAV_GROUPS = {
 };
 const NAV_ORDER = ['analytics', {group:'inspections'}, 'guest', {group:'admin'}];
 
+// Административные разделы требуют соответствующего права у вошедшего сотрудника — управляющему
+// и оператору справочники сети не нужны, и показывать их бессмысленно: писать в них им всё равно
+// не даст RLS (см. can_manage_users/can_manage_points в SQL-патчах). Проверяем именно perms-флаг,
+// а не роль — права в проекте настраиваются индивидуально (см. togglePerm и DEFAULT_PERMS_BY_ROLE).
+const SECTION_PERM = { users:'addUsers', objects:'addPoints', templates:'createChecklists' };
+
+function canSeeSection(sectionId){
+  const need = SECTION_PERM[sectionId];
+  if(!need) return true;                 // раздел без ограничений — виден всем вошедшим
+  if(!state.live) return true;           // демо-показ демонстрирует кабинет целиком, без роли
+  return !!(state.appUser && state.appUser.perms && state.appUser.perms[need]);
+}
+
 function renderConsoleNav(){
   return NAV_ORDER.map(entry=>{
     if(typeof entry === 'string'){
+      if(!canSeeSection(entry)) return '';
       const sec = CONSOLE_SECTIONS.find(s=>s.id===entry);
       return `<button class="nav-btn ${state.section===entry?'active':''}" onclick="setSection('${entry}')">${sec.label}</button>`;
     }
     const key = entry.group;
     const g = NAV_GROUPS[key];
+    const visibleChildren = g.children.filter(canSeeSection);
+    const ownVisible = !!g.ownSectionId && canSeeSection(g.ownSectionId);
+    // группа без доступных пунктов вообще не рисуется — иначе остался бы висеть пустой заголовок
+    if(!ownVisible && visibleChildren.length===0) return '';
     const ownSec = g.ownSectionId ? CONSOLE_SECTIONS.find(s=>s.id===g.ownSectionId) : null;
     const label = g.label || (ownSec ? ownSec.label : key);
-    const isActiveOwn = !!g.ownSectionId && state.section===g.ownSectionId;
-    const header = g.ownSectionId
+    const isActiveOwn = ownVisible && state.section===g.ownSectionId;
+    const header = ownVisible
       ? `<button class="nav-btn nav-group-toggle ${isActiveOwn?'active':''}" onclick="setSection('${g.ownSectionId}')">${label}</button>`
       : `<div class="nav-btn nav-group-toggle" style="cursor:default;">${label}</div>`;
     return `
       ${header}
-      ${g.children.map(childId=>{
+      ${visibleChildren.map(childId=>{
         const cs = CONSOLE_SECTIONS.find(s=>s.id===childId);
         return `<button class="nav-btn nav-sub-btn ${state.section===childId?'active':''}" onclick="setSection('${childId}')">${cs.label}</button>`;
       }).join('')}
@@ -1332,11 +1350,36 @@ function startChecklist(templateId){
   const items = buildChecklistItems(t, pointById(state.myPointId));
   checklistDraft = {
     templateId,
+    pointId: state.myPointId,
+    planId: null,
     items,
     answers: items.map(()=>({answer:null, photo:false, comment:''}))
   };
   render();
 }
+
+// Прохождение проверки, назначенной через «Планирование проверок»: тот же чек-лист и та же
+// форма, что у оператора на телефоне, но объект берётся из плана (он может быть не «моим»
+// по портфелю — проверку мне назначили), а по завершении план закрывается автоматически
+// с фактическим баллом, вместо ручного ввода балла в prompt().
+function startPlanChecklist(planId){
+  const plan = state.plannedInspections.find(p=>p.id===planId);
+  if(!plan) return;
+  const t = templateById(plan.templateId);
+  const p = pointById(plan.pointId);
+  if(!t || !p){ showBanner('Не найден чек-лист или объект этой проверки.'); return; }
+  const items = buildChecklistItems(t, p);
+  checklistDraft = {
+    templateId: t.id,
+    pointId: p.id,
+    planId: plan.id,
+    items,
+    answers: items.map(()=>({answer:null, photo:false, comment:''}))
+  };
+  render();
+}
+
+function draftPointId(){ return (checklistDraft && checklistDraft.pointId) || state.myPointId; }
 
 function setAnswer(idx, val){
   checklistDraft.answers[idx].answer = val;
@@ -1366,7 +1409,7 @@ function renderChecklistForm(){
 
   return `
     <div class="page-title">${t.name}</div>
-    <div class="page-subtitle">${pointById(state.myPointId).name} · заполняется на месте, с фото и геометкой</div>
+    <div class="page-subtitle">${(pointById(draftPointId())||{}).name||''} · заполняется на месте, с фото и геометкой</div>
     <div class="card">
       <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">Если отвечаете «Нет» — обязательно прикрепите фото и опишите проблему в комментарии.</div>
       ${items.map((it,idx)=>{
@@ -1409,6 +1452,8 @@ function renderChecklistForm(){
 async function submitChecklist(){
   if(state.checklistBusy) return; // защита от повторного нажатия «Отправить» пока идёт сохранение
   const t = templateById(checklistDraft.templateId);
+  const pointId = draftPointId();          // у назначенной проверки объект берётся из плана, а не из «моей» точки
+  const planId = checklistDraft.planId || null;
   const items = checklistDraft.items;
   const total = items.length;
   const passed = checklistDraft.answers.filter(a=>a.answer==='yes').length;
@@ -1421,11 +1466,12 @@ async function submitChecklist(){
     const today = new Date().toISOString().slice(0,10);
     try{
       const { data, error } = await sbRetry(()=> sb.from('inspections').insert({
-        point_id: state.myPointId, template_id: t.id, kind: t.type, date: today, score,
+        point_id: pointId, template_id: t.id, kind: t.type, date: today, score,
         inspector: inspectorLabel, items: itemsPayload
       }).select().single());
       if(error) throw error;
-      state.inspections.unshift(mapInspectionFromDb(data));
+      const inspection = mapInspectionFromDb(data);
+      state.inspections.unshift(inspection);
 
       // Одним запросом на все проваленные пункты сразу, а не по одной вставке в цикле —
       // так на ошибку сети/сервера приходится один ретрай на всю проверку, а не риск того, что
@@ -1433,11 +1479,13 @@ async function submitChecklist(){
       const failedItems = items.filter((it,idx)=>checklistDraft.answers[idx].answer==='no');
       if(failedItems.length>0){
         const { data: vData, error: vErr } = await sbRetry(()=> sb.from('violations').insert(
-          failedItems.map(it=>({ point_id: state.myPointId, item: it.text, critical: it.critical, status:'новое' }))
+          failedItems.map(it=>({ point_id: pointId, item: it.text, critical: it.critical, status:'новое' }))
         ).select());
         if(vErr) throw vErr;
         (vData||[]).forEach(row=> state.violations.unshift(mapViolationFromDb(row)));
       }
+
+      if(planId) await closePlanAfterChecklist(planId, inspection, score);
 
       state.operatorTasksDone.push({templateId:t.id, doneAt: minutesToTime(currentClockMinutes())});
       checklistDraft = null;
@@ -1452,25 +1500,67 @@ async function submitChecklist(){
   }
 
   const newId = Math.max(0,...state.inspections.map(i=>i.id))+1;
-  state.inspections.unshift({
-    id:newId, pointId:state.myPointId, templateId:t.id, kind:t.type,
-    date:'2026-07-08', score, inspector:'Оператор ' + pointById(state.myPointId).name,
+  const localInspection = {
+    id:newId, pointId, templateId:t.id, kind:t.type,
+    date: todayStr(), score, inspector:'Оператор ' + (pointById(pointId)||{}).name,
     items: itemsPayload
-  });
+  };
+  state.inspections.unshift(localInspection);
 
   items.forEach((it,idx)=>{
     if(checklistDraft.answers[idx].answer==='no'){
       const vid = Math.max(0,...state.violations.map(v=>v.id))+1;
       state.violations.unshift({
-        id:vid, pointId:state.myPointId, item:it.text, critical:it.critical,
+        id:vid, pointId, item:it.text, critical:it.critical,
         status:'новое', assignee:'—', deadline:'—'
       });
     }
   });
 
+  if(planId) closePlanLocallyAfterChecklist(planId, localInspection, score);
+
   state.operatorTasksDone.push({templateId:t.id, doneAt: state.demoNow});
   checklistDraft = null;
   showBanner(`Проверка отправлена. Итоговый балл: ${score}%. ${total-passed>0 ? (total-passed)+' нарушение(й) зафиксировано автоматически.' : 'Нарушений нет.'}`);
+}
+
+// Закрытие плана после фактического прохождения чек-листа. Логика повтора серии — та же, что в
+// completePlanInspection (каданс считается от плановой даты, а не от даты фактического выполнения,
+// чтобы расписание не «плыло»), но балл здесь настоящий, посчитанный по ответам.
+async function closePlanAfterChecklist(planId, inspection, score){
+  const plan = state.plannedInspections.find(p=>p.id===planId);
+  if(!plan) return;
+  plan.history = plan.history || [];
+  plan.history.push({date: inspection.date, score, inspectionId: inspection.id});
+  let planUpdate;
+  if(plan.recurrence){
+    const cadence = RECUR_CADENCE_DAYS[plan.recurrence.freq] || 1;
+    plan.assignedAt = addDays(plan.assignedAt, cadence);
+    plan.dueDate = addDays(plan.assignedAt, plan.recurrence.slaDays);
+    planUpdate = { history: plan.history, assigned_at: plan.assignedAt, due_date: plan.dueDate };
+  } else {
+    plan.status = 'выполнена';
+    plan.resultInspectionId = inspection.id;
+    planUpdate = { history: plan.history, status: 'выполнена', result_inspection_id: inspection.id };
+  }
+  const { error } = await sbRetry(()=> sb.from('planned_inspections').update(planUpdate).eq('id', planId));
+  if(error) throw error;
+}
+
+function closePlanLocallyAfterChecklist(planId, inspection, score){
+  const plan = state.plannedInspections.find(p=>p.id===planId);
+  if(!plan) return;
+  plan.history = plan.history || [];
+  plan.history.push({date: inspection.date, score, inspectionId: inspection.id});
+  if(plan.recurrence){
+    const cadence = RECUR_CADENCE_DAYS[plan.recurrence.freq] || 1;
+    plan.assignedAt = addDays(plan.assignedAt, cadence);
+    plan.dueDate = addDays(plan.assignedAt, plan.recurrence.slaDays);
+  } else {
+    plan.status = 'выполнена';
+    plan.resultInspectionId = inspection.id;
+  }
+  persistPlansToStorage();
 }
 
 function fixViolation(id){
@@ -1742,6 +1832,14 @@ function renderDirector(){
 // ---------- КАБИНЕТ УПРАВЛЕНИЯ (левое меню, ноутбук/десктоп) ----------
 
 function renderConsoleSection(){
+  // Исполнитель проходит назначенную ему проверку прямо в кабинете — пока черновик чек-листа
+  // открыт, он занимает всю область контента (как на телефоне у оператора), чтобы заполняющий
+  // видел только свою задачу и не переключался случайно в другой раздел.
+  if(checklistDraft) return renderChecklistForm();
+
+  // страховка от прямого перехода в раздел без права (например, состояние осталось с прошлой
+  // сессии другого сотрудника) — молча возвращаем на «Аналитику», доступную всем
+  if(!canSeeSection(state.section)) state.section = 'analytics';
   const sec = CONSOLE_SECTIONS.find(s=>s.id===state.section) || CONSOLE_SECTIONS[0];
   const bodyMap = {
     analytics: renderAdminAnalytics,
@@ -2199,6 +2297,14 @@ async function completePlanInspection(planId){
   }
 }
 
+// «Внести балл вручную» — обходной путь для администратора (проверку провели вне сервиса, нужно
+// просто зафиксировать результат). Обычный исполнитель должен проходить чек-лист по пунктам,
+// иначе в журнале не будет ни состава ответов, ни автоматически заведённых нарушений.
+function canCloseWithoutChecklist(){
+  if(!state.live) return true;
+  return !!(state.appUser && state.appUser.perms && state.appUser.perms.deleteInspections);
+}
+
 function renderAdminPlanning(){
   const activePoints = [...state.points]
     .filter(p=>p.status==='действующая' && matchesSearch(p.name, state.planningPointSearch))
@@ -2319,7 +2425,8 @@ function renderAdminPlanning(){
             </div>
             <span class="badge ${info.cls}">${info.label}</span>
             ${plan.status==='запланирована' ? `
-              <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="completePlanInspection(${plan.id})">Отметить выполненной</button>
+              <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="startPlanChecklist(${plan.id})">Пройти чек-лист</button>
+              ${canCloseWithoutChecklist() ? `<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" title="Внести только итоговый балл, без прохождения пунктов" onclick="completePlanInspection(${plan.id})">Внести балл вручную</button>` : ''}
               <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="cancelPlan(${plan.id})">Отменить</button>
             ` : `
               <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="deletePlan(${plan.id})">Удалить</button>
