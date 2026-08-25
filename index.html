@@ -734,6 +734,8 @@ state.authPassword = '';
 state.authBusy = false;
 state.authError = '';
 state.appUser = null;      // строка app_users вошедшего сотрудника
+state.checklistBusy = false; // идёт отправка чек-листа оператора — блокирует повторное нажатие «Отправить»
+state.guestBusy = false;     // идёт отправка гостевой проверки — блокирует повторное нажатие «Отправить»
 
 // ---- состояние самостоятельной регистрации сотрудника ----
 state.unclaimedUsers = [];   // сотрудники из app_users, у которых ещё нет логина (auth_user_id = null)
@@ -793,6 +795,20 @@ async function fetchLivePointsAndTemplates(){
   return { points: pts||[], templates: (tpls||[]).map(mapTemplateFromDb) };
 }
 
+// Повторяет запрос к Supabase при сетевой/временной ошибке — 2 дополнительные попытки с паузой,
+// прежде чем показать пользователю «не удалось сохранить». Без этого один обрыв связи на мойке
+// требовал бы вручную повторять каждое действие самому, а на слабом мобильном интернете это обычная ситуация.
+async function sbRetry(queryFn, retries){
+  retries = retries===undefined ? 2 : retries;
+  let result;
+  for(let attempt=0; attempt<=retries; attempt++){
+    result = await queryFn();
+    if(!result || !result.error) return result;
+    if(attempt<retries) await new Promise(r=>setTimeout(r, 500*(attempt+1)));
+  }
+  return result;
+}
+
 function humanizeAuthError(msg){
   if(/Invalid login credentials/i.test(msg)) return 'Неверный логин или пароль.';
   return msg;
@@ -834,8 +850,13 @@ async function finishLiveLogin(uid){
   }
   const appUser = rows[0];
   const { points, templates } = await fetchLivePointsAndTemplates();
+  // Журнал проверок растёт бесконечно (ежедневные чек-листы по каждой точке), а рейтинг и тренд
+  // используют только последние ~30 дней — поэтому при входе тянем не всю историю, а разумное
+  // окно (180 дней, с запасом на «повторяющиеся нарушения»), а не всё, что накопилось за месяцы.
+  const INSPECTIONS_FETCH_WINDOW_DAYS = 180;
+  const inspectionsCutoff = addDays(new Date().toISOString().slice(0,10), -INSPECTIONS_FETCH_WINDOW_DAYS);
   const [{data: insRows, error: insErr}, {data: violRows, error: violErr}, {data: userRows, error: usersErr}, {data: planRows, error: plansErr}] = await Promise.all([
-    sb.from('inspections').select('*').order('id', {ascending:false}),
+    sb.from('inspections').select('*').gte('date', inspectionsCutoff).order('id', {ascending:false}),
     sb.from('violations').select('*').order('id', {ascending:false}),
     sb.from('app_users').select('*'),
     sb.from('planned_inspections').select('*')
@@ -1299,6 +1320,12 @@ function renderCombo(cfg){
 
 const ANALYTICS_TODAY = '2026-07-09'; // демо-«сегодня» для расчёта пресетов периода (7/30 дней)
 
+// В живом режиме экраны показывают тем же кодом реальным сотрудникам — поэтому всё, что должно
+// считаться "от сегодня" (рейтинг, пресеты периода, просрочка плана), не может брать зафиксированную
+// демо-дату выше: иначе для настоящего пилота эти расчёты навсегда остались бы привязаны к 2026-07-09,
+// даже когда календарь давно ушёл вперёд.
+function todayStr(){ return state.live ? new Date().toISOString().slice(0,10) : ANALYTICS_TODAY; }
+
 function addDays(dateStr, days){
   const [y, m, day] = dateStr.split('-').map(Number);
   const d = new Date(Date.UTC(y, m - 1, day + days));
@@ -1424,7 +1451,7 @@ function templateById(id){ return state.templates.find(t=>t.id===id); }
 // он получается сам за счёт разной частоты проверок).
 const RATING_WINDOW_DAYS = 30;
 function computeObjectRating(pointId, asOf){
-  const to = asOf || ANALYTICS_TODAY;
+  const to = asOf || todayStr();
   const from = addDays(to, -RATING_WINDOW_DAYS);
   const scores = state.inspections.filter(i=>{
     if(i.pointId!==pointId || i.kind!=='Плановая') return false;
@@ -1718,8 +1745,8 @@ function renderChecklistForm(){
         </div>`;
       }).join('')}
       <div style="margin-top:16px;display:flex;gap:8px;">
-        <button class="btn" ${(!allAnswered||missingPhotos||missingComments)?'disabled':''} onclick="submitChecklist()">Отправить проверку</button>
-        <button class="btn btn-secondary" onclick="cancelChecklist()">Отмена</button>
+        <button class="btn" ${(!allAnswered||missingPhotos||missingComments||state.checklistBusy)?'disabled':''} onclick="submitChecklist()">${state.checklistBusy?'Сохраняем…':'Отправить проверку'}</button>
+        <button class="btn btn-secondary" ${state.checklistBusy?'disabled':''} onclick="cancelChecklist()">Отмена</button>
       </div>
       ${missingPhotos ? `<div style="margin-top:10px;font-size:12px;color:var(--danger)">Прикрепите фото там, где оно обязательно.</div>` : ''}
       ${missingComments ? `<div style="margin-top:6px;font-size:12px;color:var(--danger)">Опишите комментарием каждый пункт с ответом «Нет».</div>` : ''}
@@ -1728,6 +1755,7 @@ function renderChecklistForm(){
 }
 
 async function submitChecklist(){
+  if(state.checklistBusy) return; // защита от повторного нажатия «Отправить» пока идёт сохранение
   const t = templateById(checklistDraft.templateId);
   const items = checklistDraft.items;
   const total = items.length;
@@ -1736,27 +1764,35 @@ async function submitChecklist(){
   const itemsPayload = items.map((it,idx)=>({ text:it.text, critical:it.critical, photo:it.photo, answer:checklistDraft.answers[idx].answer, comment:checklistDraft.answers[idx].comment||'' }));
 
   if(state.live && sb){
+    state.checklistBusy = true; render();
     const inspectorLabel = state.appUser ? (state.appUser.name || 'Оператор') : 'Оператор';
     const today = new Date().toISOString().slice(0,10);
     try{
-      const { data, error } = await sb.from('inspections').insert({
+      const { data, error } = await sbRetry(()=> sb.from('inspections').insert({
         point_id: state.myPointId, template_id: t.id, kind: t.type, date: today, score,
         inspector: inspectorLabel, items: itemsPayload
-      }).select().single();
+      }).select().single());
       if(error) throw error;
       state.inspections.unshift(mapInspectionFromDb(data));
-      for(let idx=0; idx<items.length; idx++){
-        if(checklistDraft.answers[idx].answer==='no'){
-          const { data: vData, error: vErr } = await sb.from('violations').insert({
-            point_id: state.myPointId, item: items[idx].text, critical: items[idx].critical, status:'новое'
-          }).select().single();
-          if(!vErr && vData) state.violations.unshift(mapViolationFromDb(vData));
-        }
+
+      // Одним запросом на все проваленные пункты сразу, а не по одной вставке в цикле —
+      // так на ошибку сети/сервера приходится один ретрай на всю проверку, а не риск того, что
+      // часть нарушений тихо не сохранится, пока балл проверки уже показывает их как найденные.
+      const failedItems = items.filter((it,idx)=>checklistDraft.answers[idx].answer==='no');
+      if(failedItems.length>0){
+        const { data: vData, error: vErr } = await sbRetry(()=> sb.from('violations').insert(
+          failedItems.map(it=>({ point_id: state.myPointId, item: it.text, critical: it.critical, status:'новое' }))
+        ).select());
+        if(vErr) throw vErr;
+        (vData||[]).forEach(row=> state.violations.unshift(mapViolationFromDb(row)));
       }
+
       state.operatorTasksDone.push({templateId:t.id, doneAt: state.demoNow});
       checklistDraft = null;
+      state.checklistBusy = false;
       showBanner(`Проверка сохранена в общей базе. Итоговый балл: ${score}%. ${total-passed>0 ? (total-passed)+' нарушение(й) зафиксировано автоматически.' : 'Нарушений нет.'}`);
     } catch(e){
+      state.checklistBusy = false;
       showBanner('Не удалось сохранить в общую базу: ' + (e.message||e) + '. Попробуйте ещё раз.');
     }
     render();
@@ -1795,7 +1831,7 @@ async function confirmFix(id){
   const v = state.violations.find(v=>v.id===id);
   if(state.live && sb){
     try{
-      const { error } = await sb.from('violations').update({status:'устранено'}).eq('id', id);
+      const { error } = await sbRetry(()=> sb.from('violations').update({status:'устранено'}).eq('id', id));
       if(error) throw error;
     } catch(e){ showBanner('Не удалось сохранить: ' + (e.message||e)); return; }
   }
@@ -1904,7 +1940,7 @@ async function submitAssignViolation(id){
 
   if(state.live && sb){
     try{
-      const { error } = await sb.from('violations').update({assignee: assigneeName, deadline, status:'в работе'}).eq('id', id);
+      const { error } = await sbRetry(()=> sb.from('violations').update({assignee: assigneeName, deadline, status:'в работе'}).eq('id', id));
       if(error) throw error;
     } catch(e){ showBanner('Не удалось сохранить назначение: ' + (e.message||e)); return; }
   }
@@ -1916,7 +1952,7 @@ async function closeViolation(id){
   const v = state.violations.find(v=>v.id===id);
   if(state.live && sb){
     try{
-      const { error } = await sb.from('violations').update({status:'закрыто'}).eq('id', id);
+      const { error } = await sbRetry(()=> sb.from('violations').update({status:'закрыто'}).eq('id', id));
       if(error) throw error;
     } catch(e){ showBanner('Не удалось сохранить: ' + (e.message||e)); return; }
   }
@@ -2087,8 +2123,8 @@ function setAnalyticsPeriodPreset(days){
     state.adminAnalyticsFrom = null;
     state.adminAnalyticsTo = null;
   } else {
-    state.adminAnalyticsTo = ANALYTICS_TODAY;
-    state.adminAnalyticsFrom = addDays(ANALYTICS_TODAY, -days);
+    state.adminAnalyticsTo = todayStr();
+    state.adminAnalyticsFrom = addDays(todayStr(), -days);
   }
   render();
 }
@@ -2192,8 +2228,8 @@ function setInspPeriodPreset(days){
     state.inspFilterFrom = null;
     state.inspFilterTo = null;
   } else {
-    state.inspFilterTo = ANALYTICS_TODAY;
-    state.inspFilterFrom = addDays(ANALYTICS_TODAY, -days);
+    state.inspFilterTo = todayStr();
+    state.inspFilterFrom = addDays(todayStr(), -days);
   }
   render();
 }
@@ -2305,7 +2341,7 @@ function renderRepeatsPointDetail(g){
 function planStatusInfo(plan){
   if(plan.status==='выполнена') return {label:'Выполнена', cls:'badge-success'};
   if(plan.status==='отменена') return {label:'Отменена', cls:'badge-neutral'};
-  if(plan.dueDate < ANALYTICS_TODAY) return {label:'Просрочена', cls:'badge-danger'};
+  if(plan.dueDate < todayStr()) return {label:'Просрочена', cls:'badge-danger'};
   return {label:'Ожидает', cls:'badge-warning'};
 }
 
@@ -2368,18 +2404,17 @@ async function submitNewPlan(){
     assignedAt = state.planningDueDate;
     dueDate = addDays(assignedAt, slaDays);
   } else {
-    // ANALYTICS_TODAY — фиксированная демо-дата; в живом режиме нужна настоящая дата назначения
-    assignedAt = state.live ? new Date().toISOString().slice(0,10) : ANALYTICS_TODAY;
+    assignedAt = todayStr();
     dueDate = state.planningDueDate;
   }
 
   if(state.live && sb){
     try{
-      const { data, error } = await sb.from('planned_inspections').insert({
+      const { data, error } = await sbRetry(()=> sb.from('planned_inspections').insert({
         point_id: state.planningPointId, template_id: state.planningTemplateId,
         assignee_id: state.planningAssigneeId, note: state.planningNote.trim(), status:'запланирована',
         recurrence, assigned_at: assignedAt, due_date: dueDate, history: []
-      }).select().single();
+      }).select().single());
       if(error) throw error;
       state.plannedInspections.push(mapPlanFromDb(data));
       state.planningShowForm = false;
@@ -2407,7 +2442,7 @@ async function cancelPlan(planId){
   if(!confirm('Отменить запланированную проверку?')) return;
   if(state.live && sb){
     try{
-      const { error } = await sb.from('planned_inspections').update({status:'отменена'}).eq('id', planId);
+      const { error } = await sbRetry(()=> sb.from('planned_inspections').update({status:'отменена'}).eq('id', planId));
       if(error) throw error;
     } catch(e){ showBanner('Не удалось отменить: ' + (e.message||e)); return; }
     plan.status = 'отменена';
@@ -2423,7 +2458,7 @@ async function deletePlan(planId){
   if(!confirm('Удалить запись из планирования? Это действие нельзя отменить.')) return;
   if(state.live && sb){
     try{
-      const { error } = await sb.from('planned_inspections').delete().eq('id', planId);
+      const { error } = await sbRetry(()=> sb.from('planned_inspections').delete().eq('id', planId));
       if(error) throw error;
     } catch(e){ showBanner('Не удалось удалить: ' + (e.message||e)); return; }
     state.plannedInspections = state.plannedInspections.filter(p=>p.id!==planId);
@@ -2458,9 +2493,9 @@ async function completePlanInspection(planId){
   if(state.live && sb){
     try{
       const today = new Date().toISOString().slice(0,10);
-      const { data: insData, error: insErr } = await sb.from('inspections').insert({
+      const { data: insData, error: insErr } = await sbRetry(()=> sb.from('inspections').insert({
         point_id: plan.pointId, template_id: plan.templateId, kind: t.type, date: today, score, inspector, items: []
-      }).select().single();
+      }).select().single());
       if(insErr) throw insErr;
       const inspection = mapInspectionFromDb(insData);
       state.inspections.unshift(inspection);
@@ -2478,7 +2513,7 @@ async function completePlanInspection(planId){
         plan.resultInspectionId = inspection.id;
         planUpdate = { history: plan.history, status: 'выполнена', result_inspection_id: inspection.id };
       }
-      const { error: planErr } = await sb.from('planned_inspections').update(planUpdate).eq('id', planId);
+      const { error: planErr } = await sbRetry(()=> sb.from('planned_inspections').update(planUpdate).eq('id', planId));
       if(planErr) throw planErr;
       showBanner(plan.recurrence
         ? 'Проверка «'+t.name+'» по объекту «'+p.name+'» выполнена (балл '+score+'). Следующая проверка серии назначена на '+plan.dueDate+'.'
@@ -3770,7 +3805,7 @@ function renderGuest(){
             ` : ''}
           </div>
         `;}).join('')}
-        <button class="btn" ${(!allAnswered||missingPhotos||missingComments)?'disabled':''} onclick="submitGuest()">Отправить проверку</button>
+        <button class="btn" ${(!allAnswered||missingPhotos||missingComments||state.guestBusy)?'disabled':''} onclick="submitGuest()">${state.guestBusy?'Сохраняем…':'Отправить проверку'}</button>
         ${missingPhotos ? `<div style="margin-top:10px;font-size:12px;color:var(--danger)">Прикрепите фото там, где оно обязательно.</div>` : ''}
         ${missingComments ? `<div style="margin-top:6px;font-size:12px;color:var(--danger)">Опишите комментарием каждый пункт с ответом «Нет».</div>` : ''}
       </div>
@@ -3792,6 +3827,7 @@ function setGuestComment(idx, value){
 }
 
 async function submitGuest(){
+  if(state.guestBusy) return; // защита от повторного нажатия «Отправить» пока идёт сохранение
   const point = pointById(state.guestPointId);
   const t = guestTemplateForPoint(point);
   if(!point || !t) return;
@@ -3803,20 +3839,26 @@ async function submitGuest(){
   const itemsPayload = items.map((it,idx)=>({ text:it.text, critical:it.critical, photo:it.photo, answer:state.guestAnswers[idx], comment: state.guestAnswers['comment'+idx] || '' }));
 
   if(state.guestLive && sb){
+    state.guestBusy = true; render();
     const today = new Date().toISOString().slice(0,10);
     try{
-      const { error: insErr } = await sb.from('inspections').insert({
+      // Сама проверка важнее подсказки по имени/контакту — если основная вставка прошла, а
+      // обновление known_guests не удалось, это не должно откатывать уже сохранённый результат.
+      const { error: insErr } = await sbRetry(()=> sb.from('inspections').insert({
         point_id: point.id, template_id: t.id, kind:'Тайный покупатель', date: today,
         score, inspector:'Гость: '+name, guest_name:name, guest_contact:contact, items: itemsPayload
-      });
+      }));
       if(insErr) throw insErr;
-      const { data: existing } = await sb.from('known_guests').select('*').ilike('name', name);
-      if(existing && existing.length>0) await sb.from('known_guests').update({ contact }).eq('id', existing[0].id);
-      else await sb.from('known_guests').insert({ name, contact });
       state.guestSubmitted = true;
+      try{
+        const { data: existing } = await sb.from('known_guests').select('*').ilike('name', name);
+        if(existing && existing.length>0) await sb.from('known_guests').update({ contact }).eq('id', existing[0].id);
+        else await sb.from('known_guests').insert({ name, contact });
+      } catch(e){ /* подсказка на следующий визит — не критично, если не сохранилась */ }
     } catch(e){
       showBanner('Не удалось отправить проверку в общую базу: ' + (e.message||e));
     }
+    state.guestBusy = false;
     render();
     return;
   }
