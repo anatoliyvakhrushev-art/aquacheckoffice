@@ -257,6 +257,7 @@ let state = {
   newPointType: 'МСО',
   newPointRegion: 'Екатеринбург',
   newPointStatus: 'действующая',
+  newPointPosts: 6, // число постов (моечных боксов) — только у типа «МСО», по факту 4–9 на точку
   // форма добавления/редактирования пользователя
   showAddUserForm: false,
   editingUserId: null,      // null = создание нового, id = редактирование существующего
@@ -2806,6 +2807,7 @@ function toggleAddPointForm(){
     state.newPointType = 'МСО';
     state.newPointRegion = REGIONS[0];
     state.newPointStatus = 'действующая';
+    state.newPointPosts = 6;
   }
   render();
 }
@@ -2819,6 +2821,7 @@ function startEditPoint(pointId){
   state.newPointType = p.type;
   state.newPointRegion = p.region;
   state.newPointStatus = p.status;
+  state.newPointPosts = p.posts || 6;
   render();
 }
 
@@ -2827,21 +2830,48 @@ function setNewPointField(field, value){
   render();
 }
 
-function submitNewPoint(){
+async function submitNewPoint(){
   const name = state.newPointName.trim();
   if(!name){ showBanner('Укажите название объекта.'); return; }
   const isEdit = state.editingPointId !== null;
   const existing = isEdit ? state.points.find(p=>p.id===state.editingPointId) : null;
   if(isEdit && !existing){ showBanner('Объект не найден.'); state.showAddPointForm = false; state.editingPointId = null; render(); return; }
 
+  const type = state.newPointType;
+  const posts = type==='МСО' ? Math.max(1, Math.round(Number(state.newPointPosts))||6) : null;
+
+  if(state.live && sb){
+    const dbPayload = { name, type, posts, region: state.newPointRegion, status: state.newPointStatus };
+    try{
+      const { data, error } = isEdit
+        ? await sbRetry(()=> sb.from('points').update(dbPayload).eq('id', existing.id).select().single())
+        : await sbRetry(()=> sb.from('points').insert(dbPayload).select().single());
+      if(error) throw error;
+      if(isEdit){
+        const idx = state.points.findIndex(p=>p.id===existing.id);
+        state.points[idx] = data;
+      } else {
+        state.points.push(data);
+      }
+      state.showAddPointForm = false;
+      state.editingPointId = null;
+      showBanner(isEdit ? 'Изменения по объекту «'+name+'» сохранены в общей базе.' : 'Объект «'+name+'» добавлен в общую базу.');
+    } catch(e){
+      showBanner('Не удалось сохранить в общую базу: ' + (e.message||e));
+    }
+    render();
+    return;
+  }
+
   if(isEdit){
     existing.name = name;
-    existing.type = state.newPointType;
+    existing.type = type;
+    existing.posts = posts;
     existing.region = state.newPointRegion;
     existing.status = state.newPointStatus;
   } else {
     const id = Math.max(0,...state.points.map(p=>p.id))+1;
-    state.points.push({id, name, type:state.newPointType, region:state.newPointRegion, status:state.newPointStatus, score:0});
+    state.points.push({id, name, type, posts, region:state.newPointRegion, status:state.newPointStatus, score:0});
   }
 
   state.showAddPointForm = false;
@@ -2849,10 +2879,45 @@ function submitNewPoint(){
   showBanner(isEdit ? 'Изменения по объекту «'+name+'» сохранены.' : 'Объект «'+name+'» добавлен в реестр.');
 }
 
-function deletePoint(pointId){
+async function deletePoint(pointId){
   const p = state.points.find(x=>x.id===pointId);
   if(!p) return;
   if(!confirm('Удалить объект «'+p.name+'»? Это действие нельзя отменить.')) return;
+
+  if(state.live && sb){
+    try{
+      // сначала чистим ссылки на объект у операторов/управляющих в общей базе, чтобы удаление
+      // самой точки не оставляло "битые" point_id/point_ids у других сотрудников
+      const { data: holders, error: holdersErr } = await sb.from('app_users').select('id,point_id,point_ids').or('point_id.eq.'+pointId+',point_ids.cs.{'+pointId+'}');
+      if(holdersErr) throw holdersErr;
+      for(const h of (holders||[])){
+        const patch = {};
+        if(h.point_id===pointId) patch.point_id = null;
+        if(h.point_ids && h.point_ids.includes(pointId)) patch.point_ids = h.point_ids.filter(id=>id!==pointId);
+        if(Object.keys(patch).length){
+          const { error: cleanErr } = await sb.from('app_users').update(patch).eq('id', h.id);
+          if(cleanErr) throw cleanErr;
+        }
+      }
+      const { error: delErr } = await sbRetry(()=> sb.from('points').delete().eq('id', pointId));
+      if(delErr) throw delErr;
+      state.users.forEach(u=>{
+        if(u.pointIds) u.pointIds = u.pointIds.filter(id=>id!==pointId);
+        if(u.point===p.name) u.point = '—';
+      });
+      state.points = state.points.filter(x=>x.id!==pointId);
+      state.showAddPointForm = false;
+      state.editingPointId = null;
+      showBanner('Объект «'+p.name+'» удалён из общей базы.');
+    } catch(e){
+      // типичная причина отказа — у объекта уже есть проверки/нарушения/план (внешний ключ не даёт
+      // удалить строку); в этом случае в реестре есть статус «недействующая» — используйте его вместо удаления
+      showBanner('Не удалось удалить объект: ' + (e.message||e) + '. Если у объекта уже есть проверки/нарушения — поставьте статус «недействующая» вместо удаления.');
+    }
+    render();
+    return;
+  }
+
   state.points = state.points.filter(x=>x.id!==pointId);
   // очищаем ссылки на удалённую точку у операторов и управляющих
   state.users.forEach(u=>{
@@ -2889,6 +2954,12 @@ function renderAddPointForm(){
             ${state.pointTypes.map(t=>`<option ${state.newPointType===t?'selected':''}>${t}</option>`).join('')}
           </select>
         </div>
+        ${state.newPointType==='МСО' ? `
+        <div>
+          <label style="font-size:11px;color:var(--text-muted);">Число постов (боксов)</label>
+          <input type="number" min="1" max="20" style="width:100%;margin-top:2px;" value="${state.newPointPosts}" onchange="setNewPointField('Posts', this.value)" oninput="setNewPointField('Posts', this.value)">
+        </div>
+        ` : ''}
         <div>
           <label style="font-size:11px;color:var(--text-muted);">Город размещения</label><br>
           <div style="display:flex;gap:6px;align-items:center;">
