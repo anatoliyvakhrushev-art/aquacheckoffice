@@ -1327,7 +1327,7 @@ function buildChecklistItems(template, point){
   const items = [];
   const posts = point.posts || 1;
   for(let i=1;i<=posts;i++){
-    template.perPostItems.forEach(pi=> items.push({text:'Пост '+i+' — '+pi.text, critical:pi.critical, photo:pi.photo, weight:pi.weight}));
+    template.perPostItems.forEach(pi=> items.push({text:'Пост '+i+' — '+pi.text, critical:pi.critical, photo:pi.photo, weight:pi.weight, type:pi.type}));
   }
   template.siteItems.forEach(si=> items.push(si));
   return items;
@@ -1345,8 +1345,14 @@ function templateById(id){ return state.templates.find(t=>t.id===id); }
 // взвешенным и совпадает с привычным для проверяющих.
 function itemWeight(it){
   const w = Number(it && it.weight);
-  return (isFinite(w) && w > 0) ? w : 1;
+  // Явный ноль сохраняем: в реальных чек-листах так помечают пункты, которые не влияют на балл
+  // (например, «Комментарии проверяющего»). Отсутствующий/битый вес — это 1.
+  return (isFinite(w) && w >= 0) ? w : 1;
 }
+
+// Пункт-комментарий: не оценивается «да/нет», а просто просит описать словами (в источнике —
+// «Общие комментарии по проверке», вес 0). Требование ТЗ п.3.2 про текстовый тип ответа.
+function isTextItem(it){ return !!it && it.type === 'text'; }
 
 // Итоговый балл проверки: доля веса пройденных пунктов от веса всех отвеченных.
 // answers — массив либо объектов {answer}, либо самих значений 'yes'/'no'.
@@ -1357,6 +1363,7 @@ function computeChecklistScore(items, answers){
   };
   let totalWeight = 0, passedWeight = 0;
   items.forEach((it, idx)=>{
+    if(isTextItem(it)) return;             // текстовый пункт в балл не входит
     const w = itemWeight(it);
     totalWeight += w;
     if(answerOf(idx) === 'yes') passedWeight += w;
@@ -1857,11 +1864,8 @@ function restartChecklist(){
 function renderChecklistForm(){
   const t = templateById(checklistDraft.templateId);
   const items = checklistDraft.items;
-  const allAnswered = checklistDraft.answers.every(a=>a.answer!==null);
-  // фото обязательно, если так задано в самом пункте ИЛИ если ответили «Нет» (для любого пункта);
-  // комментарий обязателен при ответе «Нет» — независимо от настроек пункта
-  const missingPhotos = items.some((it,idx)=>{ const a=checklistDraft.answers[idx]; return a.answer!==null && (it.photo || a.answer==='no') && !a.photo; });
-  const missingComments = checklistDraft.answers.some(a=> a.answer==='no' && !(a.comment && a.comment.trim()));
+  const scored = items.filter(it=>!isTextItem(it)).length; // пункты-комментарии в счётчик не идут
+  const answeredCount = items.filter((it,idx)=>!isTextItem(it) && checklistDraft.answers[idx].answer!==null).length;
   const photoUploading = checklistDraft.answers.some(a=>a.photoUploading); // не отправляем, пока снимок в пути
 
   return `
@@ -1869,12 +1873,22 @@ function renderChecklistForm(){
     <div class="page-title">${t.name}</div>
     <div class="page-subtitle">
       ${(pointById(draftPointId())||{}).name||''} · заполняется на месте, с фото и геометкой<br>
-      Отвечено ${checklistDraft.answers.filter(a=>a.answer!==null).length} из ${items.length} · ответы сохраняются автоматически, можно прерваться и вернуться
+      Отвечено ${answeredCount} из ${scored} · ответы сохраняются автоматически, можно прерваться и вернуться
     </div>
     <div class="card">
       <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">Если отвечаете «Нет» — обязательно прикрепите фото и опишите проблему в комментарии.</div>
       ${items.map((it,idx)=>{
         const a = checklistDraft.answers[idx];
+
+        // Пункт-комментарий: только текстовое поле, без «Да/Нет», в балл не входит
+        if(isTextItem(it)) return `
+        <div class="checklist-item">
+          <div class="qtext">${idx+1}. ${it.text}</div>
+          <div style="margin-top:8px;">
+            <textarea id="opComment${idx}" rows="3" data-quiet-render="1" style="width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:7px;padding:6px 9px;font-family:inherit;" placeholder="Опишите словами (необязательно)" oninput="setComment(${idx}, this.value)" onblur="commitComment()">${(a.comment||'').replace(/</g,'&lt;')}</textarea>
+          </div>
+        </div>`;
+
         const photoRequired = it.photo || a.answer==='no';
         const commentRequired = a.answer==='no';
         return `
@@ -1931,8 +1945,7 @@ function renderChecklistForm(){
         <button class="btn btn-secondary" ${state.checklistBusy?'disabled':''} onclick="cancelChecklist()" title="Ответы сохранятся, можно вернуться позже">Прервать</button>
         <button class="btn btn-secondary" ${state.checklistBusy?'disabled':''} onclick="restartChecklist()" title="Удалить заполненное и начать этот чек-лист заново">Начать заново</button>
       </div>
-      ${missingPhotos ? `<div style="margin-top:10px;font-size:12px;color:var(--danger)">Прикрепите фото там, где оно обязательно.</div>` : ''}
-      ${missingComments ? `<div style="margin-top:6px;font-size:12px;color:var(--danger)">Опишите комментарием каждый пункт с ответом «Нет».</div>` : ''}
+      ${answeredCount < scored ? `<div style="margin-top:10px;font-size:12px;color:var(--text-muted)">Осталось ответить: ${scored-answeredCount}. При ответе «Нет» нужны фото и комментарий — если чего-то не хватит, кнопка отправки подскажет номер пункта.</div>` : ''}
     </div>
   `;
 }
@@ -1947,15 +1960,16 @@ async function submitChecklist(){
     const its = checklistDraft.items;
     const ans = checklistDraft.answers;
     if(ans.some(a=>a.photoUploading)){ showBanner('Дождитесь загрузки фото.'); return; }
-    const noAnswer = ans.findIndex(a=>a.answer===null);
+    // пункты-комментарии заполнять не обязательно — они не оцениваются
+    const noAnswer = its.findIndex((it,idx)=> !isTextItem(it) && ans[idx].answer===null);
     if(noAnswer>=0){
-      const left = ans.filter(a=>a.answer===null).length;
+      const left = its.filter((it,idx)=> !isTextItem(it) && ans[idx].answer===null).length;
       showBanner('Не отвечено пунктов: '+left+'. Первый из них — №'+(noAnswer+1)+'.');
       return;
     }
-    const noPhoto = its.findIndex((it,idx)=> (it.photo || ans[idx].answer==='no') && !(ans[idx].photos && ans[idx].photos.length));
+    const noPhoto = its.findIndex((it,idx)=> !isTextItem(it) && (it.photo || ans[idx].answer==='no') && !(ans[idx].photos && ans[idx].photos.length));
     if(noPhoto>=0){ showBanner('Пункт №'+(noPhoto+1)+': нужно приложить фото.'); return; }
-    const noComment = ans.findIndex(a=> a.answer==='no' && !(a.comment && a.comment.trim()));
+    const noComment = its.findIndex((it,idx)=> !isTextItem(it) && ans[idx].answer==='no' && !(ans[idx].comment && ans[idx].comment.trim()));
     if(noComment>=0){ showBanner('Пункт №'+(noComment+1)+': опишите проблему в комментарии.'); return; }
   }
 
@@ -1963,11 +1977,13 @@ async function submitChecklist(){
   const pointId = draftPointId();          // у назначенной проверки объект берётся из плана, а не из «моей» точки
   const planId = checklistDraft.planId || null;
   const items = checklistDraft.items;
-  const total = items.length;
-  const passed = checklistDraft.answers.filter(a=>a.answer==='yes').length;
+  // считаем только оцениваемые пункты: пункт-комментарий не «провален» из-за отсутствия «Да»
+  const total = items.filter(it=>!isTextItem(it)).length;
+  const passed = items.filter((it,idx)=>!isTextItem(it) && checklistDraft.answers[idx].answer==='yes').length;
   const score = computeChecklistScore(items, checklistDraft.answers); // с учётом весов пунктов
   const itemsPayload = items.map((it,idx)=>({
     text:it.text, critical:it.critical, photo:it.photo, weight:itemWeight(it),
+    type: it.type || undefined,          // 'text' — пункт-комментарий, в балл не входит
     answer:checklistDraft.answers[idx].answer,
     comment:checklistDraft.answers[idx].comment||'',
     photos: (checklistDraft.answers[idx].photos || []).filter(p=>p && p.path).map(p=>({ path: p.path }))
@@ -2561,7 +2577,9 @@ function renderInspectionDetail(insp){
                     ${streak>=2?`<span class="tag" style="color:var(--danger)">🔁 повторяется ${streak}-ю проверку подряд</span>`:''}
                   </div>
                 </div>
-                <span class="badge ${it.answer==='yes'?'badge-success':'badge-danger'}">${it.answer==='yes'?'Да':'Нет'}</span>
+                ${it.type==='text'
+                  ? `<span class="badge badge-neutral">комментарий</span>`
+                  : `<span class="badge ${it.answer==='yes'?'badge-success':'badge-danger'}">${it.answer==='yes'?'Да':'Нет'}</span>`}
               </div>
               ${it.answer==='no' && it.comment ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);background:var(--bg);border-radius:7px;padding:6px 9px;">💬 ${it.comment}</div>` : ''}
               ${(()=>{
