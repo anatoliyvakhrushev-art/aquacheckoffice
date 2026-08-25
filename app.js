@@ -1215,6 +1215,36 @@ function canSeeSection(sectionId){
   return !!(state.appUser && state.appUser.perms && state.appUser.perms[need]);
 }
 
+// Точки «моей зоны ответственности» — для ДЕТАЛЬНЫХ разделов (журнал проверок, повторяющиеся
+// нарушения). Аналитика их не использует: рейтинги и тренды считаются по всей сети, чтобы
+// управляющий видел свои точки в сравнении с остальными (см. supabase-патч, открывающий чтение
+// points/inspections всем сотрудникам). Здесь же — ограничение того, что показываем в деталях.
+// Возвращает null, если ограничивать не нужно (демо-показ или сотрудник, видящий всю сеть).
+function myScopePointIds(){
+  if(!state.live || !state.appUser) return null;      // демо-показ — без ограничений
+  const u = state.appUser;
+  if(u.perms && u.perms.addUsers) return null;         // администратор видит всё
+  if(u.role==='Маркетолог' || u.role==='Аудитор') return null;
+
+  const ids = new Set();
+  if(u.point_id) ids.add(u.point_id);
+  (u.point_ids || []).forEach(id=>ids.add(id));
+  if(u.role==='Терр. директор'){
+    (u.director_manager_ids || []).forEach(mid=>{
+      const m = state.users.find(x=>x.id===mid);
+      ((m && m.pointIds) || []).forEach(id=>ids.add(id));
+    });
+  }
+  // объекты назначенных мне проверок — их детали я тоже должен видеть (см. patch10 в базе)
+  state.plannedInspections.filter(pl=>pl.assigneeId===u.id).forEach(pl=>ids.add(pl.pointId));
+  return [...ids];
+}
+
+function isPointInMyScope(pointId){
+  const scope = myScopePointIds();
+  return scope===null || scope.includes(pointId);
+}
+
 function renderConsoleNav(){
   return NAV_ORDER.map(entry=>{
     if(typeof entry === 'string'){
@@ -2439,7 +2469,8 @@ function renderAdminPlanning(){
 }
 
 function renderAdminRepeats(){
-  const groups = getRepeatingViolationsByPoint(2);
+  // тоже детальный раздел — ограничиваем своей зоной (см. комментарий в renderAdminInspections)
+  const groups = getRepeatingViolationsByPoint(2).filter(g=>isPointInMyScope(g.pointId));
   if(groups.length===0){
     return `<div class="card"><div class="empty-state">Сейчас нет пунктов, которые проваливаются 2 и более проверки подряд на одном объекте.</div></div>`;
   }
@@ -2487,7 +2518,9 @@ function renderAdminInspections(){
   const pointOptions = pointOptionsAll.filter(p=>matchesSearch(p.name, state.inspFilterPointSearch));
   const pointSelectedLabel = pointFilter==='Все' ? 'Все' : (pointOptionsAll.find(p=>String(p.id)===pointFilter)||{}).name;
 
-  let rows = [...state.inspections].filter(i=>i.kind!=='Тайный покупатель');
+  // журнал проверок — детальный раздел: показываем только свою зону, даже если база отдаёт больше
+  // (чтение проверок открыто всем сотрудникам ради сетевой аналитики — см. myScopePointIds)
+  let rows = [...state.inspections].filter(i=>i.kind!=='Тайный покупатель' && isPointInMyScope(i.pointId));
   if(typeFilter!=='Все') rows = rows.filter(i=>{ const p = pointById(i.pointId); return p && p.type===typeFilter; });
   if(regionFilter!=='Все') rows = rows.filter(i=>{ const p = pointById(i.pointId); return p && p.region===regionFilter; });
   if(managerFilter!=='Все'){ const mgr = managerById(managerFilter); rows = mgr ? rows.filter(i=>mgr.pointIds.includes(i.pointId)) : rows; }
