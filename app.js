@@ -1302,6 +1302,8 @@ function renderConsoleNav(){
 }
 
 function setSection(section){
+  // из открытого чек-листа сайдбар должен работать — но не молча выбрасывать заполненное
+  if(!abandonChecklist()) return;
   state.section = section;
   render();
 }
@@ -1450,8 +1452,19 @@ function setComment(idx, value){
   checklistDraft.answers[idx].comment = value;
   render();
 }
-function cancelChecklist(){
+// Прерывание заполнения. Если уже есть ответы — спрашиваем подтверждение (черновик нигде не
+// сохраняется, уход со экрана его теряет), если пусто — выходим молча.
+// Возвращает false, если пользователь решил остаться — тогда вызывающий код ничего не меняет.
+function abandonChecklist(){
+  if(!checklistDraft) return true;
+  const answered = checklistDraft.answers.filter(a=>a.answer!==null).length;
+  if(answered>0 && !confirm('Заполнено пунктов: '+answered+'. Если прервать, ответы не сохранятся. Прервать заполнение?')) return false;
   checklistDraft = null;
+  return true;
+}
+
+function cancelChecklist(){
+  if(!abandonChecklist()) return;
   render();
 }
 
@@ -1465,8 +1478,12 @@ function renderChecklistForm(){
   const missingComments = checklistDraft.answers.some(a=> a.answer==='no' && !(a.comment && a.comment.trim()));
 
   return `
+    ${state.mode==='console' ? `<div style="margin-bottom:10px;"><a onclick="cancelChecklist()" style="font-size:12.5px;cursor:pointer;">← Прервать заполнение и вернуться в кабинет</a></div>` : ''}
     <div class="page-title">${t.name}</div>
-    <div class="page-subtitle">${(pointById(draftPointId())||{}).name||''} · заполняется на месте, с фото и геометкой</div>
+    <div class="page-subtitle">
+      ${(pointById(draftPointId())||{}).name||''} · заполняется на месте, с фото и геометкой<br>
+      Отвечено ${checklistDraft.answers.filter(a=>a.answer!==null).length} из ${items.length}
+    </div>
     <div class="card">
       <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">Если отвечаете «Нет» — обязательно прикрепите фото и опишите проблему в комментарии.</div>
       ${items.map((it,idx)=>{
