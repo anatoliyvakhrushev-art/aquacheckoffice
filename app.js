@@ -288,6 +288,9 @@ let state = {
   repeatsExpandedPointId: null,
   // явно раскрытые/свёрнутые группы левого меню (если ключа нет — состояние авто-определяется по активному разделу)
   openNavGroups: {},
+  // раскрыты ли блоки фильтров (по разделу). Значение не задано = по умолчанию: раскрыто на
+  // ноутбуке, свёрнуто на телефоне (см. filtersOpen)
+  filtersOpen: {},
   // фильтры раздела «Пользователи»
   usersFilterSearch: '',
   usersFilterRole: 'Все',
@@ -2498,6 +2501,40 @@ function setAdminAnalyticsFilter(field, value){
 
 function managerById(id){ return state.users.find(u=>u.role==='Управляющий' && String(u.id)===String(id)); }
 
+// ---------- Сворачиваемые фильтры ----------
+// На телефоне блок фильтров занимал почти весь первый экран, и до самих данных приходилось
+// пролистывать. Поэтому на узком экране фильтры по умолчанию свёрнуты в одну строку со сводкой
+// («Все типы · 30 дней»), а на ноутбуке остаются раскрытыми, как раньше.
+function isNarrowScreen(){
+  try{ return window.matchMedia('(max-width: 760px)').matches; } catch(e){ return false; }
+}
+
+function filtersOpen(key){
+  const explicit = state.filtersOpen[key];
+  return explicit===undefined ? !isNarrowScreen() : explicit;
+}
+
+function toggleFilters(key){
+  state.filtersOpen[key] = !filtersOpen(key);
+  render();
+}
+
+// Короткая сводка того, что реально выбрано — чтобы в свёрнутом виде было ясно, на что смотрим.
+function filtersSummary(parts){
+  const shown = parts.filter(Boolean);
+  return shown.length ? shown.join(' · ') : 'без фильтров';
+}
+
+function renderFiltersHeader(key, summary){
+  const open = filtersOpen(key);
+  return `
+    <div onclick="toggleFilters('${key}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;">
+      <h3 style="margin:0;">Фильтры ${open ? '' : `<span class="muted" style="font-weight:400;">${summary}</span>`}</h3>
+      <span class="btn btn-secondary btn-sm" style="white-space:nowrap;">${open ? 'Свернуть' : 'Изменить'}</span>
+    </div>
+  `;
+}
+
 function setAnalyticsPeriodPreset(days){
   if(days==='all'){
     state.adminAnalyticsFrom = null;
@@ -2533,26 +2570,37 @@ function renderAdminAnalytics(){
   const noPeriod = !from && !to;
   const filtersActive = typeFilter!=='Все' || regionFilter!=='Все' || managerFilter!=='Все' || pointFilter!=='Все';
 
+  const periodLabel = noPeriod ? 'весь период' : ((from||'…')+' — '+(to||'…'));
+  const summary = filtersSummary([
+    typeFilter==='Все' ? 'все типы' : typeFilter,
+    regionFilter==='Все' ? null : regionFilter,
+    managerFilter==='Все' ? null : managerSelectedLabel,
+    pointFilter==='Все' ? null : pointSelectedLabel,
+    periodLabel
+  ]);
+
   return `
     <div class="card">
-      <h3>Фильтры</h3>
-      <div class="grid-cols cols-2">
-        <div>
-          <div class="tag" style="margin-bottom:4px;">Тип мойки</div>
-          <select onchange="setAdminAnalyticsFilter('Type', this.value)">
-            <option ${typeFilter==='Все'?'selected':''}>Все</option>
-            ${state.pointTypes.map(t=>`<option ${typeFilter===t?'selected':''}>${t}</option>`).join('')}
-          </select>
+      ${renderFiltersHeader('analytics', summary)}
+      <div class="grid-cols cols-2" style="${filtersOpen('analytics') ? 'margin-top:14px;' : 'display:none;'}">
+        <div class="filter-pair" style="grid-column:1 / -1;">
+          <div>
+            <div class="tag" style="margin-bottom:4px;">Тип мойки</div>
+            <select onchange="setAdminAnalyticsFilter('Type', this.value)">
+              <option ${typeFilter==='Все'?'selected':''}>Все</option>
+              ${state.pointTypes.map(t=>`<option ${typeFilter===t?'selected':''}>${t}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <div class="tag" style="margin-bottom:4px;">Регион</div>
+            <select onchange="setAdminAnalyticsFilter('Region', this.value)">
+              <option ${regionFilter==='Все'?'selected':''}>Все</option>
+              ${REGIONS.map(r=>`<option ${regionFilter===r?'selected':''}>${r}</option>`).join('')}
+            </select>
+          </div>
         </div>
         <div>
-          <div class="tag" style="margin-bottom:4px;">Регион</div>
-          <select onchange="setAdminAnalyticsFilter('Region', this.value)">
-            <option ${regionFilter==='Все'?'selected':''}>Все</option>
-            ${REGIONS.map(r=>`<option ${regionFilter===r?'selected':''}>${r}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <div class="tag" style="margin-bottom:4px;">Управляющий <span style="font-weight:400;color:var(--text-muted);">(за ним закреплён свой портфель точек)</span></div>
+          <div class="tag" style="margin-bottom:4px;">Управляющий <span class="filter-hint" style="font-weight:400;color:var(--text-muted);">(за ним закреплён свой портфель точек)</span></div>
           ${renderCombo({
             id:'analyticsManagerCombo', setterFn:'setAdminAnalyticsFilter',
             searchField:'ManagerSearch', openField:'ManagerOpen', valueField:'Manager',
@@ -2562,7 +2610,7 @@ function renderAdminAnalytics(){
           })}
         </div>
         <div>
-          <div class="tag" style="margin-bottom:4px;">Точка <span style="font-weight:400;color:var(--text-muted);">(с учётом фильтров выше)</span></div>
+          <div class="tag" style="margin-bottom:4px;">Точка <span class="filter-hint" style="font-weight:400;color:var(--text-muted);">(с учётом фильтров выше)</span></div>
           ${renderCombo({
             id:'analyticsPointCombo', setterFn:'setAdminAnalyticsFilter',
             searchField:'PointSearch', openField:'PointOpen', valueField:'Point',
@@ -2572,7 +2620,7 @@ function renderAdminAnalytics(){
           })}
         </div>
         <div style="grid-column:1 / -1;">
-          <div class="tag" style="margin-bottom:4px;">Период <span style="font-weight:400;color:var(--text-muted);">(влияет на тренд по последним проверкам)</span></div>
+          <div class="tag" style="margin-bottom:4px;">Период <span class="filter-hint" style="font-weight:400;color:var(--text-muted);">(влияет на тренд по последним проверкам)</span></div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
             <button class="btn btn-sm ${noPeriod?'':'btn-secondary'}" onclick="setAnalyticsPeriodPreset('all')">Произвольный период</button>
             <button class="btn btn-sm btn-secondary" onclick="setAnalyticsPeriodPreset(7)">7 дней</button>
@@ -3170,26 +3218,38 @@ function renderAdminInspections(){
   if(to) rows = rows.filter(i=>i.date<=to);
   rows.sort((a,b)=> b.date.localeCompare(a.date));
 
+  const periodLabel = noPeriod ? 'весь период' : ((from||'…')+' — '+(to||'…'));
+  const summary = filtersSummary([
+    typeFilter==='Все' ? 'все типы' : typeFilter,
+    regionFilter==='Все' ? null : regionFilter,
+    managerFilter==='Все' ? null : managerSelectedLabel,
+    pointFilter==='Все' ? null : pointSelectedLabel,
+    periodLabel,
+    'найдено: '+rows.length
+  ]);
+
   return `
     <div class="card">
-      <h3>Фильтры</h3>
-      <div class="grid-cols cols-2">
-        <div>
-          <div class="tag" style="margin-bottom:4px;">Тип мойки</div>
-          <select onchange="setInspFilter('Type', this.value)">
-            <option ${typeFilter==='Все'?'selected':''}>Все</option>
-            ${state.pointTypes.map(t=>`<option ${typeFilter===t?'selected':''}>${t}</option>`).join('')}
-          </select>
+      ${renderFiltersHeader('inspections', summary)}
+      <div class="grid-cols cols-2" style="${filtersOpen('inspections') ? 'margin-top:14px;' : 'display:none;'}">
+        <div class="filter-pair" style="grid-column:1 / -1;">
+          <div>
+            <div class="tag" style="margin-bottom:4px;">Тип мойки</div>
+            <select onchange="setInspFilter('Type', this.value)">
+              <option ${typeFilter==='Все'?'selected':''}>Все</option>
+              ${state.pointTypes.map(t=>`<option ${typeFilter===t?'selected':''}>${t}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <div class="tag" style="margin-bottom:4px;">Регион</div>
+            <select onchange="setInspFilter('Region', this.value)">
+              <option ${regionFilter==='Все'?'selected':''}>Все</option>
+              ${REGIONS.map(r=>`<option ${regionFilter===r?'selected':''}>${r}</option>`).join('')}
+            </select>
+          </div>
         </div>
         <div>
-          <div class="tag" style="margin-bottom:4px;">Регион</div>
-          <select onchange="setInspFilter('Region', this.value)">
-            <option ${regionFilter==='Все'?'selected':''}>Все</option>
-            ${REGIONS.map(r=>`<option ${regionFilter===r?'selected':''}>${r}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <div class="tag" style="margin-bottom:4px;">Управляющий <span style="font-weight:400;color:var(--text-muted);">(за ним закреплён свой портфель точек)</span></div>
+          <div class="tag" style="margin-bottom:4px;">Управляющий <span class="filter-hint" style="font-weight:400;color:var(--text-muted);">(за ним закреплён свой портфель точек)</span></div>
           ${renderCombo({
             id:'inspManagerCombo', setterFn:'setInspFilter',
             searchField:'ManagerSearch', openField:'ManagerOpen', valueField:'Manager',
@@ -3199,7 +3259,7 @@ function renderAdminInspections(){
           })}
         </div>
         <div>
-          <div class="tag" style="margin-bottom:4px;">Точка <span style="font-weight:400;color:var(--text-muted);">(с учётом фильтров выше)</span></div>
+          <div class="tag" style="margin-bottom:4px;">Точка <span class="filter-hint" style="font-weight:400;color:var(--text-muted);">(с учётом фильтров выше)</span></div>
           ${renderCombo({
             id:'inspPointCombo', setterFn:'setInspFilter',
             searchField:'PointSearch', openField:'PointOpen', valueField:'Point',
