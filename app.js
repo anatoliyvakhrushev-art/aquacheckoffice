@@ -1561,13 +1561,29 @@ const NAV_ORDER = ['analytics', {group:'inspections'}, 'guest', {group:'admin'}]
 // и оператору справочники сети не нужны, и показывать их бессмысленно: писать в них им всё равно
 // не даст RLS (см. can_manage_users/can_manage_points в SQL-патчах). Проверяем именно perms-флаг,
 // а не роль — права в проекте настраиваются индивидуально (см. togglePerm и DEFAULT_PERMS_BY_ROLE).
-const SECTION_PERM = { users:'addUsers', objects:'addPoints', templates:'createChecklists' };
+// «Видеть проверки» (viewInspections) закрывает доступ к самим разделам с проверками. КАКИЕ
+// именно проверки видны — определяет не этот флаг, а распределение объектов (my_point_ids в базе
+// и myScopePointIds здесь): иначе два механизма управляли бы одним и тем же, и настройка стала бы
+// непредсказуемой. Раздел «Планирование» намеренно НЕ закрыт этим флагом — там исполнитель видит
+// назначенные ему проверки и проходит их.
+const SECTION_PERM = {
+  users:'addUsers', objects:'addPoints', templates:'createChecklists',
+  inspections:'viewInspections', repeats:'viewInspections'
+};
 
 function canSeeSection(sectionId){
   const need = SECTION_PERM[sectionId];
   if(!need) return true;                 // раздел без ограничений — виден всем вошедшим
   if(!state.live) return true;           // демо-показ демонстрирует кабинет целиком, без роли
   return !!(state.appUser && state.appUser.perms && state.appUser.perms[need]);
+}
+
+// Право назначать проверки. Оператор по умолчанию его не имеет (он заполняет то, что назначено
+// ему, а не распределяет работу), у остальных ролей включено — см. DEFAULT_PERMS_BY_ROLE.
+// Видеть раздел «Планирование» и проходить назначенное это право не запрещает.
+function canAssignInspections(){
+  if(!state.live) return true;           // демо-показ
+  return !!(state.appUser && state.appUser.perms && state.appUser.perms.assignInspections);
 }
 
 // Точки «моей зоны ответственности» — для ДЕТАЛЬНЫХ разделов (журнал проверок, повторяющиеся
@@ -2783,6 +2799,7 @@ function togglePlanningRecurring(checked){
 }
 
 async function submitNewPlan(){
+  if(!canAssignInspections()){ showBanner('Назначать проверки может сотрудник с правом «Назначать проверки».'); return; }
   if(!state.planningPointId){ showBanner('Выберите объект проверки.'); return; }
   if(!state.planningTemplateId){ showBanner('Выберите чек-лист/шаблон проверки.'); return; }
   if(!state.planningAssigneeId){ showBanner('Выберите исполнителя.'); return; }
@@ -2830,6 +2847,7 @@ async function submitNewPlan(){
 async function cancelPlan(planId){
   const plan = state.plannedInspections.find(p=>p.id===planId);
   if(!plan) return;
+  if(!canAssignInspections()){ showBanner('Отменять проверки может сотрудник с правом «Назначать проверки».'); return; }
   if(!confirm('Отменить запланированную проверку?')) return;
   if(state.live && sb){
     try{
@@ -2846,6 +2864,7 @@ async function cancelPlan(planId){
 }
 
 async function deletePlan(planId){
+  if(!canAssignInspections()){ showBanner('Удалять записи планирования может сотрудник с правом «Назначать проверки».'); return; }
   if(!confirm('Удалить запись из планирования? Это действие нельзя отменить.')) return;
   if(state.live && sb){
     try{
@@ -2960,11 +2979,17 @@ function renderAdminPlanning(){
   const rows = [...state.plannedInspections].sort((a,b)=> b.dueDate.localeCompare(a.dueDate) || b.id-a.id);
 
   return `
+    ${canAssignInspections() ? `
     <div class="card">
       <button class="btn" onclick="toggleAddPlanForm()">${state.planningShowForm ? 'Свернуть форму' : '+ Запланировать проверку'}</button>
     </div>
+    ` : `
+    <div class="card">
+      <div style="font-size:12.5px;color:var(--text-muted);">Здесь видны проверки, назначенные вам. Назначать проверки другим может сотрудник с правом «Назначать проверки».</div>
+    </div>
+    `}
 
-    ${state.planningShowForm ? `
+    ${canAssignInspections() && state.planningShowForm ? `
       <div class="card" style="border-color:var(--primary);">
         <h3>Новая проверка</h3>
         <div class="grid-cols cols-2" style="margin-bottom:14px;">
@@ -3073,9 +3098,9 @@ function renderAdminPlanning(){
               <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="startPlanChecklist(${plan.id})">${progress ? 'Продолжить заполнение ('+progress.answered+' из '+progress.total+')' : 'Пройти чек-лист'}</button>`;
             })() + `
               ${canCloseWithoutChecklist() ? `<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" title="Внести только итоговый балл, без прохождения пунктов" onclick="completePlanInspection(${plan.id})">Внести балл вручную</button>` : ''}
-              <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="cancelPlan(${plan.id})">Отменить</button>
+              ${canAssignInspections() ? `<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="cancelPlan(${plan.id})">Отменить</button>` : ''}
             ` : `
-              <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="deletePlan(${plan.id})">Удалить</button>
+              ${canAssignInspections() ? `<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="deletePlan(${plan.id})">Удалить</button>` : ''}
             `}
           </div>
         `;
