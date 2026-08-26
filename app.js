@@ -383,6 +383,7 @@ state.pwConfirm = '';
 state.pwBusy = false;
 state.pwError = '';
 state.pwDone = false;
+state.templateSaving = false; // идёт сохранение чек-листа в общую базу
 
 // ---- состояние самостоятельной регистрации сотрудника ----
 state.unclaimedUsers = [];   // сотрудники из app_users, у которых ещё нет логина (auth_user_id = null)
@@ -3255,7 +3256,7 @@ function renderTemplateSummary(t){
 function renderItemRow(templateId, key, idx, it){
   return `
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-      <input type="text" value="${it.text.replace(/"/g,'&quot;')}" style="flex:1;" onchange="updateItemText(${templateId},'${key}',${idx},this.value)">
+      <input type="text" value="${(it.text||'').replace(/"/g,'&quot;')}" placeholder="Впишите формулировку пункта" style="flex:1;" onchange="updateItemText(${templateId},'${key}',${idx},this.value)">
       <label style="font-size:11px;display:flex;align-items:center;gap:3px;white-space:nowrap;"><input type="checkbox" ${it.critical?'checked':''} onchange="toggleItemFlag(${templateId},'${key}',${idx},'critical')"> критично</label>
       <label style="font-size:11px;display:flex;align-items:center;gap:3px;white-space:nowrap;"><input type="checkbox" ${it.photo?'checked':''} onchange="toggleItemFlag(${templateId},'${key}',${idx},'photo')"> фото</label>
       <button class="btn btn-sm btn-secondary" onclick="removeItem(${templateId},'${key}',${idx})" title="Удалить пункт">✕</button>
@@ -3340,9 +3341,11 @@ function renderTemplateEditor(t){
       ` : renderItemsEditor(t, 'items', 'Пункты чек-листа')}
 
       <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn btn-secondary" onclick="toggleEditTemplate(${t.id})">Готово</button>
+        ${state.live ? `<button class="btn" ${state.templateSaving?'disabled':''} onclick="saveTemplate(${t.id})">${state.templateSaving?'Сохраняем…':'Сохранить в общую базу'}</button>` : ''}
+        <button class="btn btn-secondary" onclick="toggleEditTemplate(${t.id})">${state.live ? 'Свернуть' : 'Готово'}</button>
         <button class="btn btn-secondary" style="color:var(--danger)" onclick="deleteTemplate(${t.id})">Удалить чек-лист</button>
       </div>
+      ${state.live ? `<div style="margin-top:8px;font-size:11.5px;color:var(--text-muted);">Правки видны сразу, но в общую базу попадут только после «Сохранить» — иначе исчезнут при следующем входе.</div>` : ''}
     </div>
   `;
 }
@@ -3353,7 +3356,9 @@ function toggleEditTemplate(id){
 }
 
 function createTemplate(){
-  const newId = Math.max(0,...state.templates.map(t=>t.id))+1;
+  // отрицательный id — признак «ещё не сохранён в базе»: у сохранённых id выдаёт сама база,
+  // и придуманный здесь номер мог бы совпасть с чужим настоящим
+  const newId = state.live ? -Date.now() : Math.max(0,...state.templates.map(t=>t.id))+1;
   state.templates.push({
     id:newId, name:'Новый чек-лист', type:'Плановая', pointType:'МСО', role:'Оператор',
     schedule:{freq:'weekly', label:'еженедельно'}, multiPost:false, items:[]
@@ -3362,10 +3367,70 @@ function createTemplate(){
   render();
 }
 
-function deleteTemplate(id){
+// Сохранение чек-листа в общую базу. Отдельной кнопкой, а не на каждое изменение: в редакторе
+// правится название, галочки и десятки пунктов — писать в базу на каждое нажатие означало бы
+// шквал запросов и риск сохранить полузаполненный пункт.
+async function saveTemplate(id){
+  const t = templateById(id);
+  if(!t) return;
+  if(!state.live || !sb){ showBanner('Сохранение в общую базу доступно только в рабочем режиме.'); return; }
+
+  const name = (t.name||'').trim();
+  if(!name){ showBanner('Укажите название чек-листа.'); return; }
+  const keys = t.multiPost ? ['perPostItems','siteItems'] : ['items'];
+  const blank = keys.some(k=> (t[k]||[]).some(it=>!(it.text||'').trim()));
+  if(blank){ showBanner('Есть пункты без формулировки — заполните или удалите их.'); return; }
+  const totalItems = keys.reduce((n,k)=>n+(t[k]||[]).length, 0);
+  if(totalItems===0){ showBanner('Добавьте хотя бы один пункт.'); return; }
+
+  const payload = {
+    name,
+    type: t.type,
+    point_type: t.pointType || null,
+    role: t.role || null,
+    schedule: t.schedule || null,
+    multi_post: !!t.multiPost,
+    items: t.multiPost ? [] : (t.items || []),
+    per_post_items: t.multiPost ? (t.perPostItems || []) : [],
+    site_items: t.multiPost ? (t.siteItems || []) : []
+  };
+
+  state.templateSaving = true; render();
+  try{
+    const isNew = id < 0;   // см. createTemplate
+    const { data, error } = isNew
+      ? await sbRetry(()=> sb.from('templates').insert(payload).select().single())
+      : await sbRetry(()=> sb.from('templates').update(payload).eq('id', id).select().single());
+    if(error) throw error;
+    const saved = mapTemplateFromDb(data);
+    const idx = state.templates.findIndex(x=>x.id===id);
+    state.templates[idx] = saved;
+    if(state.editingTemplateId===id) state.editingTemplateId = saved.id;
+    state.templateSaving = false;
+    showBanner('Чек-лист «'+saved.name+'» сохранён в общей базе.');
+  } catch(e){
+    state.templateSaving = false;
+    showBanner('Не удалось сохранить чек-лист: ' + ((e && e.message) || e));
+  }
+  render();
+}
+
+async function deleteTemplate(id){
   const t = templateById(id);
   if(!confirm('Удалить чек-лист «'+t.name+'»? Это действие нельзя отменить.')) return;
-  state.templates = state.templates.filter(t=>t.id!==id);
+
+  if(state.live && sb && id > 0){   // отрицательный id — черновик, в базе его ещё нет
+    try{
+      const { error } = await sbRetry(()=> sb.from('templates').delete().eq('id', id));
+      if(error) throw error;
+    } catch(e){
+      // типичная причина — на чек-лист уже ссылаются проведённые проверки или планы
+      showBanner('Не удалось удалить чек-лист: ' + ((e && e.message) || e) + '. Если по нему уже проводили проверки, удалить его нельзя.');
+      render();
+      return;
+    }
+  }
+  state.templates = state.templates.filter(x=>x.id!==id);
   state.editingTemplateId = null;
   showBanner('Чек-лист удалён.');
 }
@@ -3431,7 +3496,9 @@ function removeItem(templateId, key, idx){
   render();
 }
 function addItem(templateId, key){
-  templateById(templateId)[key].push({text:'Новый пункт (заполните формулировку)', critical:false, photo:false});
+  // текст пустой, а подсказка живёт в placeholder — иначе она попадала в поле как настоящее
+  // значение, и формулировка впечатывалась внутрь этой подсказки
+  templateById(templateId)[key].push({text:'', critical:false, photo:false});
   render();
 }
 
