@@ -3521,13 +3521,19 @@ function renderPointsTable(type, list){
   return `
     <div class="card">
       <h3>${TYPE_LABELS[type]} <span class="muted">(${group.length} точ${group.length===1?'ка':'ек'} · рейтинг — среднее по проверкам управляющего/тер.директора за 30 дней)</span></h3>
+      ${type==='МСО' ? `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px;">Число постов задаётся у объекта и определяет, сколько блоков «Пост N» появится в попостовом чек-листе. Нажмите на строку, чтобы изменить.</div>` : ''}
       <table class="points-table">
         <tr><th>Точка</th><th>Регион</th><th>Статус</th><th>Рейтинг</th></tr>
         ${group.map(p=>{
           const rating = computeObjectRating(p.id);
+          // число постов показываем прямо в списке — иначе, чтобы сверить его по всем МСО,
+          // приходилось бы открывать карточку каждой точки по очереди
+          const postsTag = type==='МСО'
+            ? (p.posts ? ` <span class="tag" style="color:var(--primary);">${p.posts} пост.</span>` : ` <span class="tag" style="color:var(--danger);">постов не указано</span>`)
+            : '';
           return `
           <tr style="cursor:pointer;" onclick="startEditPoint(${p.id})" title="Нажмите, чтобы изменить">
-            <td>${p.name} <span style="color:var(--primary);font-size:11px;">✎</span></td>
+            <td>${p.name}${postsTag} <span style="color:var(--primary);font-size:11px;">✎</span></td>
             <td>${p.region}</td>
             <td>${p.status==='действующая'?'<span class="badge badge-success">действующая</span>':'<span class="badge badge-neutral">недействующая</span>'}</td>
             <td>${p.status!=='действующая' ? '—' : (rating===null ? '<span class="tag">нет данных</span>' : scoreBadge(rating))}</td>
