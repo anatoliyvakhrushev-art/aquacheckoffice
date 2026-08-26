@@ -1407,6 +1407,10 @@ function computeChecklistScore(items, answers){
   let totalWeight = 0, passedWeight = 0;
   items.forEach((it, idx)=>{
     if(isTextItem(it)) return;             // текстовый пункт в балл не входит
+    // «Н/П» — на этом объекте такого узла нет (например, ворот на части МСО). Пункт выпадает из
+    // расчёта целиком, вместе со своим весом: иначе отсутствующее оборудование занижало бы балл,
+    // и приходилось бы держать отдельный шаблон под каждую конфигурацию точки.
+    if(answerOf(idx) === 'na') return;
     const w = itemWeight(it);
     totalWeight += w;
     if(answerOf(idx) === 'yes') passedWeight += w;
@@ -1447,6 +1451,7 @@ function computeRepeatStreak(pointId, itemText, uptoDate){
   let streak = 0;
   for(let k=hist.length-1;k>=0;k--){
     const it = hist[k].items.find(x=>x.text===itemText);
+    if(it && it.answer==='na') continue; // узла на объекте нет — проверка эту серию не подтверждает и не обрывает
     if(it && it.answer==='no') streak++;
     else break;
   }
@@ -1919,7 +1924,10 @@ function renderChecklistForm(){
       Отвечено ${answeredCount} из ${scored} · ответы сохраняются автоматически, можно прерваться и вернуться
     </div>
     <div class="card">
-      <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">Если отвечаете «Нет» — обязательно прикрепите фото и опишите проблему в комментарии.</div>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">
+        Если отвечаете «Нет» — обязательно прикрепите фото и опишите проблему в комментарии.<br>
+        «Н/П» — если на этом объекте такого узла нет (например, ворот): пункт не учитывается в балле.
+      </div>
       ${items.map((it,idx)=>{
         const a = checklistDraft.answers[idx];
 
@@ -1932,7 +1940,8 @@ function renderChecklistForm(){
           </div>
         </div>`;
 
-        const photoRequired = it.photo || a.answer==='no';
+        // при «Н/П» проверять нечего — ни фото, ни комментарий не требуются
+        const photoRequired = a.answer!=='na' && (it.photo || a.answer==='no');
         const commentRequired = a.answer==='no';
         return `
         <div class="checklist-item">
@@ -1948,6 +1957,7 @@ function renderChecklistForm(){
             <div class="answer-toggle">
               <button class="toggle-btn yes ${a.answer==='yes'?'active':''}" onclick="setAnswer(${idx},'yes')">Да</button>
               <button class="toggle-btn no ${a.answer==='no'?'active':''}" onclick="setAnswer(${idx},'no')">Нет</button>
+              <button class="toggle-btn na ${a.answer==='na'?'active':''}" title="Не применимо: на этом объекте такого нет — пункт не влияет на балл" onclick="setAnswer(${idx},'na')">Н/П</button>
             </div>
           </div>
           ${photoRequired ? (()=>{
@@ -2010,7 +2020,7 @@ async function submitChecklist(){
       showBanner('Не отвечено пунктов: '+left+'. Первый из них — №'+(noAnswer+1)+'.');
       return;
     }
-    const noPhoto = its.findIndex((it,idx)=> !isTextItem(it) && (it.photo || ans[idx].answer==='no') && !(ans[idx].photos && ans[idx].photos.length));
+    const noPhoto = its.findIndex((it,idx)=> !isTextItem(it) && ans[idx].answer!=='na' && (it.photo || ans[idx].answer==='no') && !(ans[idx].photos && ans[idx].photos.length));
     if(noPhoto>=0){ showBanner('Пункт №'+(noPhoto+1)+': нужно приложить фото.'); return; }
     const noComment = its.findIndex((it,idx)=> !isTextItem(it) && ans[idx].answer==='no' && !(ans[idx].comment && ans[idx].comment.trim()));
     if(noComment>=0){ showBanner('Пункт №'+(noComment+1)+': опишите проблему в комментарии.'); return; }
@@ -2020,8 +2030,9 @@ async function submitChecklist(){
   const pointId = draftPointId();          // у назначенной проверки объект берётся из плана, а не из «моей» точки
   const planId = checklistDraft.planId || null;
   const items = checklistDraft.items;
-  // считаем только оцениваемые пункты: пункт-комментарий не «провален» из-за отсутствия «Да»
-  const total = items.filter(it=>!isTextItem(it)).length;
+  // в подсчёт для баннера идут только оцениваемые пункты: ни текстовый комментарий, ни «Н/П»
+  // (узла нет на объекте) не являются «непройденными»
+  const total = items.filter((it,idx)=>!isTextItem(it) && checklistDraft.answers[idx].answer!=='na').length;
   const passed = items.filter((it,idx)=>!isTextItem(it) && checklistDraft.answers[idx].answer==='yes').length;
   const score = computeChecklistScore(items, checklistDraft.answers); // с учётом весов пунктов
   const itemsPayload = items.map((it,idx)=>({
@@ -2622,7 +2633,9 @@ function renderInspectionDetail(insp){
                 </div>
                 ${it.type==='text'
                   ? `<span class="badge badge-neutral">комментарий</span>`
-                  : `<span class="badge ${it.answer==='yes'?'badge-success':'badge-danger'}">${it.answer==='yes'?'Да':'Нет'}</span>`}
+                  : it.answer==='na'
+                    ? `<span class="badge badge-neutral" title="Не применимо: на объекте такого узла нет — в балл не входит">Н/П</span>`
+                    : `<span class="badge ${it.answer==='yes'?'badge-success':'badge-danger'}">${it.answer==='yes'?'Да':'Нет'}</span>`}
               </div>
               ${it.answer==='no' && it.comment ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);background:var(--bg);border-radius:7px;padding:6px 9px;">💬 ${it.comment}</div>` : ''}
               ${(()=>{
@@ -4276,7 +4289,7 @@ function renderGuest(){
   const items = buildChecklistItems(t, point) || t.items || [];
   const allAnswered = items.every((it,idx)=> state.guestAnswers[idx]!==undefined);
   // фото обязательно, если так задано в пункте ИЛИ если ответили «Нет»; комментарий обязателен при «Нет»
-  const missingPhotos = items.some((it,idx)=>{ const ans=state.guestAnswers[idx]; return ans!==undefined && (it.photo || ans==='no') && !state.guestAnswers['photo'+idx]; });
+  const missingPhotos = items.some((it,idx)=>{ const ans=state.guestAnswers[idx]; return ans!==undefined && ans!=='na' && (it.photo || ans==='no') && !state.guestAnswers['photo'+idx]; });
   const missingComments = items.some((it,idx)=> state.guestAnswers[idx]==='no' && !(state.guestAnswers['comment'+idx] && state.guestAnswers['comment'+idx].trim()));
 
   return `
@@ -4287,10 +4300,13 @@ function renderGuest(){
       </div>
       <div class="guest-body">
         <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:16px">Вы не видите внутреннюю структуру сети — только эту форму. Ссылка станет неактивной сразу после отправки.</div>
-        <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:16px">Если отвечаете «Нет» — обязательно прикрепите фото и опишите проблему в комментарии.</div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:16px">
+          Если отвечаете «Нет» — обязательно прикрепите фото и опишите проблему в комментарии.<br>
+          «Н/П» — если на этом объекте такого нет: пункт не учитывается в оценке.
+        </div>
         ${items.map((it,idx)=>{
           const ans = state.guestAnswers[idx];
-          const photoRequired = it.photo || ans==='no';
+          const photoRequired = ans!=='na' && (it.photo || ans==='no');
           const commentRequired = ans==='no';
           const comment = state.guestAnswers['comment'+idx] || '';
           return `
@@ -4300,6 +4316,7 @@ function renderGuest(){
               <div class="answer-toggle">
                 <button class="toggle-btn yes ${ans==='yes'?'active':''}" onclick="setGuestAnswer(${idx},'yes')">Да</button>
                 <button class="toggle-btn no ${ans==='no'?'active':''}" onclick="setGuestAnswer(${idx},'no')">Нет</button>
+                <button class="toggle-btn na ${ans==='na'?'active':''}" title="Не применимо: на этом объекте такого нет" onclick="setGuestAnswer(${idx},'na')">Н/П</button>
               </div>
             </div>
             ${photoRequired ? `<div class="photo-btn ${state.guestAnswers['photo'+idx]?'attached':''}" onclick="toggleGuestPhoto(${idx})">📷 ${state.guestAnswers['photo'+idx]?'Фото прикреплено':'Прикрепить фото'}${ans==='no' && !it.photo ? ' (обязательно при ответе «Нет»)' : ''}</div>` : ''}

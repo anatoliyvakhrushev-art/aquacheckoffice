@@ -199,6 +199,8 @@
   }
   .toggle-btn.yes.active{background:var(--success-bg);border-color:var(--success);color:var(--success);}
   .toggle-btn.no.active{background:var(--danger-bg);border-color:var(--danger);color:var(--danger);}
+  /* «Н/П» — нейтральный, не красный: это не нарушение, а отсутствие узла на объекте */
+  .toggle-btn.na.active{background:var(--neutral-bg);border-color:var(--text-muted);color:var(--text-muted);font-weight:600;}
   .photo-btn{
     margin-top:10px;
     display:inline-flex;
