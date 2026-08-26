@@ -135,6 +135,8 @@
      период — строкой ниже на всю ширину. На телефоне раскладка другая, см. медиа-запрос. */
   .filters-grid{display:grid;gap:14px;grid-template-columns:repeat(4, minmax(0,1fr));align-items:end;}
   .filters-grid .filters-period{grid-column:1 / -1;}
+  /* пятый фильтр (проверяющий) занимает две колонки — в одну имя не читается */
+  .filters-grid .filters-span2{grid-column:span 2;}
   .filters-grid select, .filters-grid input[type=text]{width:100%;}
 
   .grid-cols{display:grid;gap:16px;}

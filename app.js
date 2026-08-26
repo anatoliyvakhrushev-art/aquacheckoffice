@@ -277,6 +277,11 @@ let state = {
   adminAnalyticsManagerOpen: false,
   inspFilterPointSearch: '',
   inspFilterPointOpen: false,
+  // проверяющий — в журнале это текстовая подпись из самой проверки («Вахрушев Анатолий»,
+  // «Оператор МСО Ловина»), а не ссылка на пользователя, поэтому фильтруем по значению
+  inspFilterInspector: 'Все',
+  inspFilterInspectorSearch: '',
+  inspFilterInspectorOpen: false,
   inspFilterManagerSearch: '',
   inspFilterManagerOpen: false,
   // фильтры раздела «Объекты проверок»
@@ -2645,7 +2650,12 @@ function renderAdminAnalytics(){
 function setInspFilter(field, value){
   if((field==='From' || field==='To') && value===''){ value = null; }
   state['inspFilter'+field] = value;
-  if(field==='Type' || field==='Region' || field==='Manager'){ state.inspFilterPoint = 'Все'; } // смена типа/региона/управляющего сбрасывает выбранную точку
+  if(field==='Type' || field==='Region' || field==='Manager'){
+    // смена типа/региона/управляющего сбрасывает и точку, и проверяющего: выбранный ранее мог
+    // просто не встречаться в новой выборке, и список выглядел бы пустым без объяснения
+    state.inspFilterPoint = 'Все';
+    state.inspFilterInspector = 'Все';
+  }
   render();
 }
 
@@ -3190,6 +3200,7 @@ function renderAdminInspections(){
   const regionFilter = state.inspFilterRegion;
   const managerFilter = state.inspFilterManager;
   const pointFilter = state.inspFilterPoint;
+  const inspectorFilter = state.inspFilterInspector;
   const from = state.inspFilterFrom;
   const to = state.inspFilterTo;
   const noPeriod = !from && !to;
@@ -3214,6 +3225,12 @@ function renderAdminInspections(){
   if(pointFilter!=='Все') rows = rows.filter(i=>String(i.pointId)===pointFilter);
   if(from) rows = rows.filter(i=>i.date>=from);
   if(to) rows = rows.filter(i=>i.date<=to);
+
+  // Список проверяющих собираем ДО применения фильтра по проверяющему (иначе после выбора в нём
+  // остался бы один вариант), но ПОСЛЕ остальных фильтров — как у комбобокса «Точка».
+  const inspectorOptions = [...new Set(rows.map(i=>(i.inspector||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  if(inspectorFilter!=='Все') rows = rows.filter(i=>(i.inspector||'').trim()===inspectorFilter);
+
   rows.sort((a,b)=> b.date.localeCompare(a.date));
 
   const periodLabel = noPeriod ? 'весь период' : ((from||'…')+' — '+(to||'…'));
@@ -3222,6 +3239,7 @@ function renderAdminInspections(){
     regionFilter==='Все' ? null : regionFilter,
     managerFilter==='Все' ? null : managerSelectedLabel,
     pointFilter==='Все' ? null : pointSelectedLabel,
+    inspectorFilter==='Все' ? null : inspectorFilter,
     periodLabel,
     'найдено: '+rows.length
   ]);
@@ -3263,6 +3281,18 @@ function renderAdminInspections(){
             placeholder:'Все — начните вводить название…',
             rows: [{value:'Все', label:'Все', active:pointFilter==='Все'}, ...pointOptions.map(p=>({value:String(p.id), label:p.name, active:pointFilter===String(p.id)}))]
           })}
+        </div>
+        <div class="filters-wide filters-span2">
+          <div class="tag" style="margin-bottom:4px;">Проверяющий <span class="filter-hint" style="font-weight:400;color:var(--text-muted);">(кто проводил проверку)</span></div>
+          ${renderCombo({
+            id:'inspInspectorCombo', setterFn:'setInspFilter',
+            searchField:'InspectorSearch', openField:'InspectorOpen', valueField:'Inspector',
+            isOpen: state.inspFilterInspectorOpen, searchValue: state.inspFilterInspectorSearch,
+            selectedLabel: inspectorFilter==='Все' ? 'Все' : inspectorFilter,
+            placeholder:'Все — начните вводить имя…',
+            rows: [{value:'Все', label:'Все', active:inspectorFilter==='Все'}, ...inspectorOptions.map(name=>({value:name, label:name, active:inspectorFilter===name}))]
+          })}
+          ${inspectorOptions.length===0 ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Проверок за выбранный период пока нет.</div>` : ''}
         </div>
         <div class="filters-period">
           <div class="tag" style="margin-bottom:4px;">Период</div>
