@@ -190,6 +190,25 @@
   .btn-secondary:hover{background:var(--border);}
   .btn-sm{padding:5px 10px;font-size:11.5px;}
   .btn:disabled{opacity:.5;cursor:not-allowed;}
+  /* Карточка проверки в журнале — мобильная замена широкой таблице */
+  .insp-card{
+    border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--card);
+  }
+
+  /* Заголовок блока пунктов («Пост 1», «Бокс 2») — сворачивается нажатием */
+  .group-head{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:var(--neutral-bg);border-radius:8px;padding:9px 12px;margin:10px 0 8px;
+    cursor:pointer;user-select:none;font-size:13px;
+  }
+  .group-head:hover{background:var(--border);}
+  .group-head.group-done{background:var(--success-bg);}
+  /* пункт, к которому перешли по кнопке отправки: видно, куда именно смотреть */
+  .checklist-item.item-highlight{
+    border-color:var(--primary);
+    box-shadow:0 0 0 2px var(--primary) inset;
+  }
+
   .checklist-item{
     border:1px solid var(--border);
     border-radius:10px;

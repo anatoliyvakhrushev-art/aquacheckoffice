@@ -296,6 +296,9 @@ let state = {
   // раскрыты ли блоки фильтров (по разделу). Значение не задано = по умолчанию: раскрыто на
   // ноутбуке, свёрнуто на телефоне (см. filtersOpen)
   filtersOpen: {},
+  // свёрнутые блоки чек-листа («Пост 1», «Бокс 2») при заполнении
+  collapsedGroups: {},
+  highlightItem: null,   // пункт, к которому только что перешли по кнопке отправки
   // фильтры раздела «Пользователи»
   usersFilterSearch: '',
   usersFilterRole: 'Все',
@@ -1800,6 +1803,8 @@ function startChecklist(templateId){
     items,
     answers: answersForChecklist(items, templateId, state.myPointId, null)
   };
+  state.collapsedGroups = {};
+  state.highlightItem = null;
   render();
   restorePhotoPreviews();
 }
@@ -1822,6 +1827,8 @@ function startPlanChecklist(planId){
     items,
     answers: answersForChecklist(items, t.id, p.id, plan.id)
   };
+  state.collapsedGroups = {};
+  state.highlightItem = null;
   render();
   restorePhotoPreviews();
 }
@@ -1830,6 +1837,7 @@ function draftPointId(){ return (checklistDraft && checklistDraft.pointId) || st
 
 function setAnswer(idx, val){
   checklistDraft.answers[idx].answer = val;
+  if(state.highlightItem===idx) state.highlightItem = null; // ответили — подсветка больше не нужна
   saveChecklistDraft();
   render();
 }
@@ -1962,31 +1970,69 @@ function restartChecklist(){
   render();
 }
 
+// Группировка пунктов по блокам «Пост N — …»: в попостовом чек-листе МСО их бывает 6–9 по 20
+// пунктов, и listать 130 строк подряд на телефоне неудобно. Пункты без такого префикса
+// (общие вопросы, комментарий) собираются в группу без заголовка.
+function checklistGroups(items){
+  const groups = [];
+  let current = null;
+  items.forEach((it, idx)=>{
+    const m = /^(Пост\s*\d+|Бокс\s*\d+)\s*—\s*/.exec(it.text || '');
+    const title = m ? m[1] : null;
+    if(!current || current.title !== title){
+      current = { title, indexes: [] };
+      groups.push(current);
+    }
+    current.indexes.push(idx);
+  });
+  return groups;
+}
+
+function toggleChecklistGroup(title){
+  state.collapsedGroups[title] = !state.collapsedGroups[title];
+  render();
+}
+
+function setAllChecklistGroups(collapsed){
+  const groups = checklistGroups(checklistDraft.items).filter(g=>g.title);
+  state.collapsedGroups = {};
+  if(collapsed) groups.forEach(g=>{ state.collapsedGroups[g.title] = true; });
+  render();
+}
+
+// Переход к пункту, который не заполнен: раскрывает его блок, прокручивает к нему и подсвечивает.
+// Иначе на чек-листе из сотни пунктов приходилось искать нужный глазами.
+function focusChecklistItem(idx){
+  const it = checklistDraft && checklistDraft.items[idx];
+  if(!it) return;
+  const m = /^(Пост\s*\d+|Бокс\s*\d+)\s*—\s*/.exec(it.text || '');
+  if(m && state.collapsedGroups[m[1]]) state.collapsedGroups[m[1]] = false;
+  state.highlightItem = idx;
+  render();
+  // прокрутка — после перерисовки, иначе элемента ещё нет в DOM
+  setTimeout(()=>{
+    const el = document.getElementById('chk-item-'+idx);
+    if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
+  }, 60);
+}
+
 function renderChecklistForm(){
   const t = templateById(checklistDraft.templateId);
   const items = checklistDraft.items;
   const scored = items.filter(it=>!isTextItem(it)).length; // пункты-комментарии в счётчик не идут
   const answeredCount = items.filter((it,idx)=>!isTextItem(it) && checklistDraft.answers[idx].answer!==null).length;
   const photoUploading = checklistDraft.answers.some(a=>a.photoUploading); // не отправляем, пока снимок в пути
+  const groups = checklistGroups(items);
+  const hasGroups = groups.some(g=>g.title);
 
-  return `
-    ${state.mode==='console' ? `<div style="margin-bottom:10px;"><a onclick="cancelChecklist()" style="font-size:12.5px;cursor:pointer;">← Прервать и вернуться в кабинет (ответы сохранятся)</a></div>` : ''}
-    <div class="page-title">${t.name}</div>
-    <div class="page-subtitle">
-      ${(pointById(draftPointId())||{}).name||''} · заполняется на месте, с фото и геометкой<br>
-      Отвечено ${answeredCount} из ${scored} · ответы сохраняются автоматически, можно прерваться и вернуться
-    </div>
-    <div class="card">
-      <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">
-        Если отвечаете «Нет» — обязательно прикрепите фото и опишите проблему в комментарии.<br>
-        «Н/А» (неактуально) — если на этом объекте такого узла нет (например, ворот): пункт не учитывается в балле.
-      </div>
-      ${items.map((it,idx)=>{
+  const renderItem = (idx)=>{
+        const it = items[idx];
         const a = checklistDraft.answers[idx];
+        const highlighted = state.highlightItem===idx;
 
         // Пункт-комментарий: только текстовое поле, без «Да/Нет», в балл не входит
         if(isTextItem(it)) return `
-        <div class="checklist-item">
+        <div class="checklist-item ${highlighted?'item-highlight':''}" id="chk-item-${idx}">
           <div class="qtext">${idx+1}. ${it.text}</div>
           <div style="margin-top:8px;">
             <textarea id="opComment${idx}" rows="3" data-quiet-render="1" style="width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:7px;padding:6px 9px;font-family:inherit;" placeholder="Опишите словами (необязательно)" oninput="setComment(${idx}, this.value)" onblur="commitComment()">${(a.comment||'').replace(/</g,'&lt;')}</textarea>
@@ -1995,9 +2041,11 @@ function renderChecklistForm(){
 
         // при «Н/А» проверять нечего — ни фото, ни комментарий не требуются
         const photoRequired = a.answer!=='na' && (it.photo || a.answer==='no');
+        // фото можно приложить и к ответу «Да» — например, зафиксировать, что узел в порядке
+        const photoAllowed = a.answer==='yes' || a.answer==='no';
         const commentRequired = a.answer==='no';
         return `
-        <div class="checklist-item">
+        <div class="checklist-item ${highlighted?'item-highlight':''}" id="chk-item-${idx}">
           <div class="row">
             <div>
               <div class="qtext">${idx+1}. ${it.text}</div>
@@ -2013,7 +2061,7 @@ function renderChecklistForm(){
               <button class="toggle-btn na ${a.answer==='na'?'active':''}" title="Неактуально: на этом объекте такого нет — пункт не влияет на балл" onclick="setAnswer(${idx},'na')">Н/А</button>
             </div>
           </div>
-          ${photoRequired ? (()=>{
+          ${(photoRequired || photoAllowed) ? (()=>{
             const photos = a.photos || [];
             return `
             <div style="margin-top:10px;">
@@ -2032,7 +2080,9 @@ function renderChecklistForm(){
               ` : ''}
               ${a.photoUploading ? `<div class="photo-btn">⏳ Загружаем снимки…</div>` : `
                 <label class="photo-btn ${photos.length>0?'attached':''}" style="cursor:pointer;">
-                  📷 ${photos.length>0 ? 'Добавить ещё фото ('+photos.length+' шт.)' : 'Приложить фото'}${photos.length===0 && a.answer==='no' && !it.photo ? ' — обязательно при ответе «Нет»' : ''}
+                  📷 ${photos.length>0
+                      ? 'Добавить ещё фото ('+photos.length+' шт.)'
+                      : (photoRequired ? 'Приложить фото — обязательно' : 'Приложить фото — по желанию')}
                   <input type="file" accept="image/*" multiple style="display:none;" onchange="uploadChecklistPhotos(${idx}, this)">
                 </label>
               `}
@@ -2045,13 +2095,51 @@ function renderChecklistForm(){
             </div>
           ` : ''}
         </div>`;
+  };
+
+  return `
+    ${state.mode==='console' ? `<div style="margin-bottom:10px;"><a onclick="cancelChecklist()" style="font-size:12.5px;cursor:pointer;">← Прервать и вернуться в кабинет (ответы сохранятся)</a></div>` : ''}
+    <div class="page-title">${t.name}</div>
+    <div class="page-subtitle">
+      ${(pointById(draftPointId())||{}).name||''} · заполняется на месте, с фото и геометкой<br>
+      Отвечено ${answeredCount} из ${scored} · ответы сохраняются автоматически, можно прерваться и вернуться
+    </div>
+    <div class="card">
+      <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">
+        Если отвечаете «Нет» — обязательно прикрепите фото и опишите проблему в комментарии. К ответу «Да» фото можно приложить по желанию.<br>
+        «Н/А» (неактуально) — если на этом объекте такого узла нет (например, ворот): пункт не учитывается в балле.
+      </div>
+      ${hasGroups ? `
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+          <button class="btn btn-secondary btn-sm" onclick="setAllChecklistGroups(true)">Свернуть все блоки</button>
+          <button class="btn btn-secondary btn-sm" onclick="setAllChecklistGroups(false)">Развернуть все</button>
+        </div>
+      ` : ''}
+      ${groups.map(g=>{
+        if(!g.title) return g.indexes.map(renderItem).join('');
+        // сводка по блоку видна и в свёрнутом виде — понятно, где ещё не закончено
+        const scoredIn = g.indexes.filter(i=>!isTextItem(items[i]));
+        const answeredIn = scoredIn.filter(i=>checklistDraft.answers[i].answer!==null).length;
+        const failedIn = scoredIn.filter(i=>checklistDraft.answers[i].answer==='no').length;
+        const done = answeredIn===scoredIn.length;
+        const collapsed = !!state.collapsedGroups[g.title];
+        return `
+          <div class="group-head ${done?'group-done':''}" onclick="toggleChecklistGroup('${g.title}')">
+            <div>
+              <span style="font-weight:700;">${g.title}</span>
+              <span class="muted" style="font-size:12px;"> · отвечено ${answeredIn} из ${scoredIn.length}${failedIn?` · нарушений: ${failedIn}`:''}</span>
+            </div>
+            <span style="font-size:12px;color:var(--text-muted);white-space:nowrap;">${collapsed?'развернуть ▾':'свернуть ▴'}</span>
+          </div>
+          ${collapsed ? '' : g.indexes.map(renderItem).join('')}
+        `;
       }).join('')}
-      <div style="margin-top:16px;display:flex;gap:8px;">
+      <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn" ${(photoUploading||state.checklistBusy)?'disabled':''} onclick="submitChecklist()">${state.checklistBusy?'Сохраняем…':(photoUploading?'Ждём загрузку фото…':'Отправить проверку')}</button>
         <button class="btn btn-secondary" ${state.checklistBusy?'disabled':''} onclick="cancelChecklist()" title="Ответы сохранятся, можно вернуться позже">Прервать</button>
         <button class="btn btn-secondary" ${state.checklistBusy?'disabled':''} onclick="restartChecklist()" title="Удалить заполненное и начать этот чек-лист заново">Начать заново</button>
       </div>
-      ${answeredCount < scored ? `<div style="margin-top:10px;font-size:12px;color:var(--text-muted)">Осталось ответить: ${scored-answeredCount}. При ответе «Нет» нужны фото и комментарий — если чего-то не хватит, кнопка отправки подскажет номер пункта.</div>` : ''}
+      ${answeredCount < scored ? `<div style="margin-top:10px;font-size:12px;color:var(--text-muted)">Осталось ответить: ${scored-answeredCount}. Нажмите «Отправить проверку» — сервис сам перейдёт к первому незаполненному пункту.</div>` : ''}
     </div>
   `;
 }
@@ -2066,17 +2154,20 @@ async function submitChecklist(){
     const its = checklistDraft.items;
     const ans = checklistDraft.answers;
     if(ans.some(a=>a.photoUploading)){ showBanner('Дождитесь загрузки фото.'); return; }
-    // пункты-комментарии заполнять не обязательно — они не оцениваются
+    // пункты-комментарии заполнять не обязательно — они не оцениваются.
+    // При нехватке чего-либо сразу переходим к этому пункту: искать его глазами среди сотни
+    // строк (у попостовых чек-листов их бывает 130+) — то, чего делать не должен человек.
     const noAnswer = its.findIndex((it,idx)=> !isTextItem(it) && ans[idx].answer===null);
     if(noAnswer>=0){
       const left = its.filter((it,idx)=> !isTextItem(it) && ans[idx].answer===null).length;
-      showBanner('Не отвечено пунктов: '+left+'. Первый из них — №'+(noAnswer+1)+'.');
+      showBanner('Не отвечено пунктов: '+left+'. Открыт первый из них — №'+(noAnswer+1)+'.');
+      focusChecklistItem(noAnswer);
       return;
     }
     const noPhoto = its.findIndex((it,idx)=> !isTextItem(it) && ans[idx].answer!=='na' && (it.photo || ans[idx].answer==='no') && !(ans[idx].photos && ans[idx].photos.length));
-    if(noPhoto>=0){ showBanner('Пункт №'+(noPhoto+1)+': нужно приложить фото.'); return; }
+    if(noPhoto>=0){ showBanner('Пункт №'+(noPhoto+1)+': нужно приложить фото.'); focusChecklistItem(noPhoto); return; }
     const noComment = its.findIndex((it,idx)=> !isTextItem(it) && ans[idx].answer==='no' && !(ans[idx].comment && ans[idx].comment.trim()));
-    if(noComment>=0){ showBanner('Пункт №'+(noComment+1)+': опишите проблему в комментарии.'); return; }
+    if(noComment>=0){ showBanner('Пункт №'+(noComment+1)+': опишите проблему в комментарии.'); focusChecklistItem(noComment); return; }
   }
 
   const t = templateById(checklistDraft.templateId);
@@ -3312,7 +3403,29 @@ function renderAdminInspections(){
 
     <div class="card">
       <h3>Проверки <span class="muted">(журнал плановых проверок по всей сети · нажмите на строку, чтобы открыть чек-лист)</span></h3>
-      ${rows.length===0 ? '<div class="empty-state">Нет проверок по заданным фильтрам.</div>' : `
+      ${rows.length===0 ? '<div class="empty-state">Нет проверок по заданным фильтрам.</div>' : (isNarrowScreen() ? `
+        ${rows.map(i=>{
+          // На телефоне таблица из семи колонок требует горизонтальной прокрутки, а раскрытая
+          // проверка внутри неё уезжает за экран — поэтому здесь карточки на всю ширину.
+          const p = pointById(i.pointId);
+          const t = templateById(i.templateId);
+          const isOpen = state.expandedInspectionId===i.id;
+          return `
+            <div class="insp-card">
+              <div onclick="toggleInspectionDetail(${i.id})" style="cursor:pointer;">
+                <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+                  <div style="font-weight:600;">${p ? p.name : '—'} ${p ? `<span class="tag">${p.type}</span>` : ''}</div>
+                  ${scoreBadge(i.score)}
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">${i.date} · ${t ? t.name : '—'}</div>
+                <div style="font-size:12px;color:var(--text-muted);">Проверяющий: ${i.inspector}</div>
+              </div>
+              <button class="btn btn-sm btn-secondary" style="margin-top:8px;width:100%;" onclick="toggleInspectionDetail(${i.id})">${isOpen ? 'Свернуть' : 'Открыть состав проверки'}</button>
+              ${isOpen ? renderInspectionDetail(i) : ''}
+            </div>
+          `;
+        }).join('')}
+      ` : `
       <div class="table-scroll">
       <table>
         <tr><th>Дата</th><th>Точка</th><th>Тип</th><th>Чек-лист</th><th>Проверяющий</th><th>Балл</th><th></th></tr>
@@ -3334,7 +3447,8 @@ function renderAdminInspections(){
           `;
         }).join('')}
       </table>
-      </div>`}
+      </div>
+      `)}
     </div>
   `;
 }
