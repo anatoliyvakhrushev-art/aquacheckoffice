@@ -4533,12 +4533,22 @@ function renderUserMenu(){
   `;
 }
 
+// Логотип работает как «домой» — на телефоне это самый крупный и очевидный элемент шапки,
+// и тянуться к пункту «Аналитика» в горизонтальном списке разделов неудобно.
+function goHome(){
+  if(!abandonChecklist()) return;   // открытый чек-лист сохраняется, а не теряется
+  state.userMenuOpen = false;
+  state.mode = 'console';
+  state.section = 'analytics';
+  render();
+}
+
 function renderShellFull(inner){
   return `
     ${renderUserMenu()}
     <div class="app">
       <aside class="sidebar">
-        <div class="brand-mark">
+        <div class="brand-mark brand-home" onclick="goHome()" title="На главный экран — аналитика">
           <span class="brand-icon">💧</span>
           <span class="brand-word"><span class="brand-part-a">Aqua</span><span class="brand-part-b">CheckOffice</span></span>
         </div>

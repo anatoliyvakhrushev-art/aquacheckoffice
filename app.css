@@ -41,6 +41,10 @@
     overflow-y:auto;
   }
   .brand-mark{display:flex;align-items:center;gap:8px;margin-bottom:2px;}
+  /* логотип-ссылка «домой»: заметно, что по нему можно нажать */
+  .brand-home{cursor:pointer;user-select:none;border-radius:8px;padding:2px 4px;margin-left:-4px;transition:background .15s;}
+  .brand-home:hover{background:rgba(255,255,255,.1);}
+  .brand-home:active{background:rgba(255,255,255,.16);}
   .brand-icon{
     font-size:15px;
     width:26px;height:26px;flex-shrink:0;
