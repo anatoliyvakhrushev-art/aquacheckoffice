@@ -1162,8 +1162,48 @@ function patchComboList(id, rows, setterFn, searchField, openField, valueField){
   listEl.innerHTML = comboRowsHtml(rows, setterFn, searchField, openField, valueField);
 }
 
+// ---------- «Тихий» набор текста в комбобоксах ----------
+// Любой комбобокс с ручным вводом страдал одной и той же болезнью: набор буквы вызывал полную
+// перерисовку экрана, которая пересоздавала <input> прямо во время нажатия, и часть символов
+// пропадала (особенно заметно на телефоне и при быстром наборе). Раньше это лечили точечно на
+// экране регистрации; теперь это поведение по умолчанию для всех комбобоксов.
+//
+// Как работает: renderCombo получает ПОЛНЫЙ список вариантов, фильтрацию по введённому тексту
+// делает сам. Во время набора состояние приложения не меняется вообще — обновляется только
+// список подсказок (patchComboList), поэтому перерисовки нет и поле ввода не пересоздаётся.
+// Выбор варианта и уход из поля работают как раньше, через обычные сеттеры с render().
+const COMBO_REGISTRY = {};
+
+// Поиск над списком с галочками (мойки управляющего, управляющие в подчинении): прячем строки
+// прямо в DOM, без перерисовки — по той же причине, что и в комбобоксах. Выбранные галочки
+// при этом не сбрасываются, потому что элементы не пересоздаются.
+function filterCheckboxList(containerId, value){
+  const box = document.getElementById(containerId);
+  if(!box) return;
+  const q = (value||'').trim().toLowerCase();
+  let shown = 0;
+  box.querySelectorAll('[data-filter-label]').forEach(el=>{
+    const hit = !q || (el.dataset.filterLabel||'').toLowerCase().includes(q);
+    el.style.display = hit ? '' : 'none';
+    if(hit) shown++;
+  });
+  const empty = box.querySelector('[data-filter-empty]');
+  if(empty) empty.style.display = shown===0 ? '' : 'none';
+}
+
+function comboQuietInput(id, value){
+  const c = COMBO_REGISTRY[id];
+  if(!c) return;
+  patchComboList(id, c.rows.filter(r=>matchesSearch(r.label, value)), c.setterFn, c.searchField, c.openField, c.valueField);
+}
+
 function renderCombo(cfg){
-  const { id, setterFn, searchField, openField, valueField, isOpen, searchValue, selectedLabel, placeholder, rows, onInputOverride, onFocusOverride } = cfg;
+  const { id, setterFn, searchField, openField, valueField, isOpen, searchValue, selectedLabel, placeholder, onInputOverride, onFocusOverride } = cfg;
+  // selfFilter: rows — полный список, фильтруем и патчим сами (см. комментарий выше)
+  const selfFilter = cfg.selfFilter !== false && !onInputOverride;
+  const allRows = cfg.rows || [];
+  const rows = selfFilter ? allRows.filter(r=>matchesSearch(r.label, searchValue)) : allRows;
+  if(selfFilter) COMBO_REGISTRY[id] = { rows: allRows, setterFn, searchField, openField, valueField };
   const q = (s) => `'${String(s).replace(/'/g,"\\'")}'`;
   // Важно: вызываем сеттер ОДИН раз за нажатие клавиши (не два). Список и так уже открыт —
   // его открывает onfocus при входе в поле, до начала набора текста. Второй вызов здесь
@@ -1174,7 +1214,9 @@ function renderCombo(cfg){
   // onInputOverride — для полей, где даже отложенный (debounce) render() пересоздаёт поле
   // слишком часто на телефоне (тяжёлый экран + фоновая подгрузка данных): такие поля вместо
   // общего render() точечно патчат только список подсказок, см. patchComboList().
-  const onInput = onInputOverride || `${setterFn}(${q(searchField)}, this.value)`;
+  const onInput = onInputOverride || (selfFilter
+    ? `comboQuietInput(${q(id)}, this.value)`          // только список подсказок, без перерисовки
+    : `${setterFn}(${q(searchField)}, this.value)`);
   // onFocusOverride: '' — для полей, у которых список подсказок и так уже открыт заранее
   // (см. goRegister()), так что вызывать по фокусу render() незачем — это лишь источник той же
   // самой гонки с первыми нажатиями клавиш, от которой защищает onInputOverride.
@@ -1189,7 +1231,7 @@ function renderCombo(cfg){
   return `
     <div style="position:relative;width:100%;box-sizing:border-box;">
       <input type="text" id="${id}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="width:100%;box-sizing:border-box;"
-        ${onInputOverride ? 'data-quiet-render="1"' : ''}
+        ${(onInputOverride || selfFilter) ? 'data-quiet-render="1"' : ''}
         value="${(isOpen ? searchValue : (selectedLabel||'')).replace(/"/g,'&quot;')}"
         placeholder="${placeholder}"
         oninput="${onInput}"
@@ -2417,7 +2459,7 @@ function renderAdminAnalytics(){
   const pointFilter = state.adminAnalyticsPoint;
   const from = state.adminAnalyticsFrom;
   const to = state.adminAnalyticsTo;
-  const managerCandidates = state.users.filter(u=>u.role==='Управляющий' && matchesSearch(u.name, state.adminAnalyticsManagerSearch));
+  const managerCandidates = state.users.filter(u=>u.role==='Управляющий'); // фильтрует сам комбобокс
   const managerSelectedLabel = managerFilter==='Все' ? 'Все' : (managerById(managerFilter)||{}).name;
 
   let pts = state.points.filter(p=>p.status==='действующая');
@@ -2426,7 +2468,7 @@ function renderAdminAnalytics(){
   if(managerFilter!=='Все'){ const mgr = managerById(managerFilter); pts = mgr ? pts.filter(p=>mgr.pointIds.includes(p.id)) : pts; }
   // список точек для комбобокса «Точка» — учитывает уже выбранные тип/регион/управляющего, но не сам фильтр по точке
   const pointOptionsAll = [...pts].sort((a,b)=>a.name.localeCompare(b.name));
-  const pointOptions = pointOptionsAll.filter(p=>matchesSearch(p.name, state.adminAnalyticsPointSearch));
+  const pointOptions = pointOptionsAll; // фильтрует сам комбобокс
   const pointSelectedLabel = pointFilter==='Все' ? 'Все' : (pointOptionsAll.find(p=>String(p.id)===pointFilter)||{}).name;
   if(pointFilter!=='Все') pts = pts.filter(p=>String(p.id)===pointFilter);
 
@@ -2862,14 +2904,16 @@ function canCloseWithoutChecklist(){
 }
 
 function renderAdminPlanning(){
+  // Списки передаются в комбобоксы ПОЛНОСТЬЮ, без фильтра по введённому тексту: фильтрацию
+  // делает сам комбобокс, иначе при удалении символа список не расширялся бы обратно
+  // (см. comboQuietInput).
   const activePoints = [...state.points]
-    .filter(p=>p.status==='действующая' && matchesSearch(p.name, state.planningPointSearch))
+    .filter(p=>p.status==='действующая')
     .sort((a,b)=>a.name.localeCompare(b.name));
   const selectedPoint = state.planningPointId ? pointById(state.planningPointId) : null;
-  const availableTemplates = (selectedPoint ? state.templates.filter(t=> !t.pointType || t.pointType===selectedPoint.type) : [])
-    .filter(t=>matchesSearch(t.name, state.planningTemplateSearch));
+  const availableTemplates = selectedPoint ? state.templates.filter(t=> !t.pointType || t.pointType===selectedPoint.type) : [];
   const selectedTemplate = state.planningTemplateId ? templateById(state.planningTemplateId) : null;
-  const assigneeCandidates = state.users.filter(u=>matchesSearch(u.name, state.planningAssigneeSearch));
+  const assigneeCandidates = state.users;
   const rows = [...state.plannedInspections].sort((a,b)=> b.dueDate.localeCompare(a.dueDate) || b.id-a.id);
 
   return `
@@ -3035,7 +3079,7 @@ function renderAdminInspections(){
   const from = state.inspFilterFrom;
   const to = state.inspFilterTo;
   const noPeriod = !from && !to;
-  const managerCandidates = state.users.filter(u=>u.role==='Управляющий' && matchesSearch(u.name, state.inspFilterManagerSearch));
+  const managerCandidates = state.users.filter(u=>u.role==='Управляющий'); // фильтрует сам комбобокс
   const managerSelectedLabel = managerFilter==='Все' ? 'Все' : (managerById(managerFilter)||{}).name;
 
   // список точек для комбобокса «Точка» — учитывает тип/регион/управляющего, но не сам фильтр по точке
@@ -3044,7 +3088,7 @@ function renderAdminInspections(){
   if(regionFilter!=='Все') candidatePts = candidatePts.filter(p=>p.region===regionFilter);
   if(managerFilter!=='Все'){ const mgr = managerById(managerFilter); candidatePts = mgr ? candidatePts.filter(p=>mgr.pointIds.includes(p.id)) : candidatePts; }
   const pointOptionsAll = [...candidatePts].sort((a,b)=>a.name.localeCompare(b.name));
-  const pointOptions = pointOptionsAll.filter(p=>matchesSearch(p.name, state.inspFilterPointSearch));
+  const pointOptions = pointOptionsAll; // фильтрует сам комбобокс
   const pointSelectedLabel = pointFilter==='Все' ? 'Все' : (pointOptionsAll.find(p=>String(p.id)===pointFilter)||{}).name;
 
   // журнал проверок — детальный раздел: показываем только свою зону, даже если база отдаёт больше
@@ -3429,7 +3473,7 @@ function renderAdminPoints(){
   if(regionFilter!=='Все') filtered = filtered.filter(p=>p.region===regionFilter);
   // список для комбобокса «Объект» — учитывает уже выбранный регион, но не сам фильтр по объекту
   const pointOptionsAll = filtered.slice().sort((a,b)=>a.name.localeCompare(b.name));
-  const pointOptions = pointOptionsAll.filter(p=>matchesSearch(p.name, state.pointsFilterPointSearch));
+  const pointOptions = pointOptionsAll; // фильтрует сам комбобокс
   const pointSelectedLabel = pointFilter==='Все' ? 'Все' : (pointOptionsAll.find(p=>String(p.id)===pointFilter)||{}).name;
   if(pointFilter!=='Все') filtered = filtered.filter(p=>String(p.id)===pointFilter);
 
@@ -3865,11 +3909,11 @@ async function deleteUser(userId){
 
 function renderAddUserForm(){
   const role = state.newUserRole;
+  // полный список — фильтрует сам комбобокс, см. comboQuietInput
   const activePoints = [...state.points]
-    .filter(p=>p.status==='действующая' && matchesSearch(p.name, state.newUserPointSearch))
+    .filter(p=>p.status==='действующая')
     .sort((a,b)=>a.name.localeCompare(b.name));
-  const managerCandidates = state.users
-    .filter(u=>u.role==='Управляющий' && matchesSearch(u.name, state.newUserManagerSearch));
+  const managerCandidates = state.users.filter(u=>u.role==='Управляющий'); // фильтрует поле поиска, без перерисовки
 
   // мойка может быть закреплена только за одним управляющим — собираем, кому уже принадлежит
   // каждая точка (кроме самого редактируемого пользователя), чтобы заблокировать выбор занятых точек
@@ -3929,15 +3973,16 @@ function renderAddUserForm(){
         <div style="margin-bottom:14px;">
           <label style="font-size:11px;color:var(--text-muted);">Мойки, закреплённые за управляющим <span style="font-weight:400;">(можно выбрать несколько, в том числе разных типов)</span></label>
           <div id="newUserPointList" data-preserve-scroll style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:6px;">
-            <input type="text" id="newUserPointSearch" style="width:100%;margin-bottom:6px;" placeholder="Поиск по названию мойки…" value="${state.newUserPointSearch.replace(/"/g,'&quot;')}" oninput="setNewUserField('PointSearch', this.value)">
+            <input type="text" id="newUserPointSearch" data-quiet-render="1" style="width:100%;margin-bottom:6px;" placeholder="Поиск по названию мойки…" value="${state.newUserPointSearch.replace(/"/g,'&quot;')}" oninput="filterCheckboxList('newUserPointList', this.value)">
             ${activePoints.length===0 ? '<div class="empty-state" style="padding:6px 0;">Ничего не найдено.</div>' : activePoints.map(p=>{
               const takenBy = pointOwnerName[p.id];
               return `
-              <label style="display:flex;align-items:center;gap:8px;padding:4px 2px;font-size:12.5px;${takenBy ? 'opacity:.5;cursor:not-allowed;' : 'cursor:pointer;'}" ${takenBy ? `title="Уже закреплено за ${takenBy.replace(/"/g,'&quot;')}"` : ''}>
+              <label data-filter-label="${(p.name+' '+p.type).replace(/"/g,'&quot;')}" style="display:flex;align-items:center;gap:8px;padding:4px 2px;font-size:12.5px;${takenBy ? 'opacity:.5;cursor:not-allowed;' : 'cursor:pointer;'}" ${takenBy ? `title="Уже закреплено за ${takenBy.replace(/"/g,'&quot;')}"` : ''}>
                 <input type="checkbox" ${state.newUserPointIds.includes(p.id)?'checked':''} ${takenBy?'disabled':''} onchange="toggleNewUserPoint(${p.id})">
                 ${p.name} <span class="tag">${p.type}</span>${takenBy ? `<span class="tag" style="color:var(--text-muted);">занято: ${takenBy}</span>` : ''}
               </label>
             `;}).join('')}
+            <div data-filter-empty class="empty-state" style="padding:6px 0;display:none;">Ничего не найдено.</div>
           </div>
           <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Выбрано: ${state.newUserPointIds.length}</div>
         </div>
@@ -3947,13 +3992,14 @@ function renderAddUserForm(){
         <div style="margin-bottom:14px;">
           <label style="font-size:11px;color:var(--text-muted);">Управляющие в подчинении <span style="font-weight:400;">(зона ответственности директора = объекты этих управляющих)</span></label>
           <div id="newUserManagerList" data-preserve-scroll style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:6px;">
-            <input type="text" id="newUserManagerSearch" style="width:100%;margin-bottom:6px;" placeholder="Поиск по фамилии управляющего…" value="${state.newUserManagerSearch.replace(/"/g,'&quot;')}" oninput="setNewUserField('ManagerSearch', this.value)">
+            <input type="text" id="newUserManagerSearch" data-quiet-render="1" style="width:100%;margin-bottom:6px;" placeholder="Поиск по фамилии управляющего…" value="${state.newUserManagerSearch.replace(/"/g,'&quot;')}" oninput="filterCheckboxList('newUserManagerList', this.value)">
             ${managerCandidates.length===0 ? '<div class="empty-state" style="padding:6px 0;">Ничего не найдено.</div>' : managerCandidates.map(m=>`
-              <label style="display:flex;align-items:center;gap:8px;padding:4px 2px;font-size:12.5px;cursor:pointer;">
+              <label data-filter-label="${m.name.replace(/"/g,'&quot;')}" style="display:flex;align-items:center;gap:8px;padding:4px 2px;font-size:12.5px;cursor:pointer;">
                 <input type="checkbox" ${state.newUserManagerIds.includes(m.id)?'checked':''} onchange="toggleNewUserManager(${m.id})">
                 ${m.name} <span class="tag">${userScopeLabel(m)}</span>
               </label>
             `).join('')}
+            <div data-filter-empty class="empty-state" style="padding:6px 0;display:none;">Ничего не найдено.</div>
           </div>
           <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Выбрано: ${state.newUserManagerIds.length}</div>
         </div>
@@ -4084,8 +4130,9 @@ function startGuestChecklist(){
 // Это НЕ создание пользователя системы: имя/контакт хранятся только при конкретной проверке,
 // без роли, без прав доступа, без входа в систему — только чтобы знать, кто проверял, и как связаться.
 function renderGuestIntake(){
+  // полный список — фильтрует сам комбобокс, см. comboQuietInput
   const activePoints = [...state.points]
-    .filter(p=>p.status==='действующая' && matchesSearch(p.name, state.guestPointSearch))
+    .filter(p=>p.status==='действующая')
     .sort((a,b)=>a.name.localeCompare(b.name));
   const selectedPoint = state.guestPointId ? pointById(state.guestPointId) : null;
   const matchedTemplate = selectedPoint ? guestTemplateForPoint(selectedPoint) : null;
