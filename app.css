@@ -131,6 +131,12 @@
   }
   .card h3{margin:0 0 14px 0;font-size:15px;}
   .card h3 .muted{color:var(--text-muted);font-weight:400;font-size:12px;}
+  /* Сетка фильтров: на ноутбуке все четыре (тип, регион, управляющий, точка) в одну строку,
+     период — строкой ниже на всю ширину. На телефоне раскладка другая, см. медиа-запрос. */
+  .filters-grid{display:grid;gap:14px;grid-template-columns:repeat(4, minmax(0,1fr));align-items:end;}
+  .filters-grid .filters-period{grid-column:1 / -1;}
+  .filters-grid select, .filters-grid input[type=text]{width:100%;}
+
   .grid-cols{display:grid;gap:16px;}
   .cols-3{grid-template-columns:repeat(3,1fr);}
   .cols-2{grid-template-columns:repeat(2,1fr);}
@@ -350,9 +356,10 @@
     /* На телефоне пояснения под заголовком раздела съедают по 2–3 строки на каждом экране,
        а нужны они только при первом знакомстве — на маленьком экране важнее сами данные. */
     .page-subtitle{display:none;}
-    /* Два коротких фильтра (тип мойки и регион) встают в одну строку, а не в две */
-    .filter-pair{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-    .filter-pair select{width:100%;}
+    /* Четыре фильтра в строку на телефон не влезают: короткие (тип и регион) оставляем парой,
+       поиск по управляющему и точке — на всю ширину, иначе поле становится нечитаемо узким. */
+    .filters-grid{grid-template-columns:1fr 1fr;gap:10px;}
+    .filters-grid > .filters-wide{grid-column:1 / -1;}
     /* Подсказки внутри подписей фильтров на телефоне тоже лишние */
     .filter-hint{display:none;}
 
