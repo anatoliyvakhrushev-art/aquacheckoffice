@@ -366,6 +366,32 @@ const PILOT_ONLY = ENTRY === 'pilot';
 const DEMO_ONLY = ENTRY === 'demo';
 if(PILOT_ONLY) state.mode = 'login';
 
+// ---------- Запоминание входа ----------
+// Supabase хранит сессию в браузере сам, но приложение её не спрашивало при загрузке — поэтому
+// каждое обновление страницы выбрасывало на экран входа, хотя сотрудник уже был авторизован.
+// Плюс своё ограничение по бездействию: если сервисом не пользовались дольше 14 дней, сессия
+// принудительно закрывается (телефон точки — общий, и «вечный» вход на нём нежелателен).
+const SESSION_LAST_SEEN_KEY = 'checkoffice_last_seen_v1';
+const SESSION_MAX_IDLE_DAYS = 14;
+
+function touchSession(){
+  try{ localStorage.setItem(SESSION_LAST_SEEN_KEY, new Date().toISOString()); }
+  catch(e){ /* приватный режим — просто не запомним, вход останется на одну сессию */ }
+}
+
+function sessionIdleTooLong(){
+  try{
+    const raw = localStorage.getItem(SESSION_LAST_SEEN_KEY);
+    if(!raw) return false;                       // метки нет — считаем вход свежим
+    const days = (Date.now() - new Date(raw).getTime()) / 86400000;
+    return !(days >= 0) ? false : days > SESSION_MAX_IDLE_DAYS;
+  } catch(e){ return false; }
+}
+
+function forgetSession(){
+  try{ localStorage.removeItem(SESSION_LAST_SEEN_KEY); } catch(e){}
+}
+
 // ---- состояние рабочего входа ----
 state.live = false;        // true = сейчас показан реальный сеанс сотрудника (не демо)
 state.guestLive = false;   // true = гостевая проверка сейчас идёт по реальным данным
@@ -523,6 +549,8 @@ async function finishLiveLogin(uid){
   state.appUser = appUser;
   state.myPointId = appUser.point_id || (appUser.point_ids && appUser.point_ids[0]) || null;
   state.live = true;
+
+  touchSession();   // отметка активности: от неё считаются 14 дней бездействия
 
   // незаконченные чек-листы этого сотрудника с других устройств
   mergeCloudDraftsIntoLocal();
@@ -820,6 +848,7 @@ function renderPasswordScreen(){
 
 async function doLogout(){
   if(sb) { try{ await sb.auth.signOut(); }catch(e){} }
+  forgetSession();   // вышли осознанно — следующий заход снова через логин
   restoreDemoData();
   state.appUser = null;
   state.mode = PILOT_ONLY ? 'login' : 'console'; // в пилоте после выхода — обратно на вход, не в демо-кабинет
@@ -4591,7 +4620,16 @@ function performRender(){
   const scrollMap = {};
   root.querySelectorAll('[data-preserve-scroll]').forEach(el=>{ if(el.id) scrollMap[el.id] = el.scrollTop; });
 
-  if(state.mode==='login'){
+  if(state.authRestoring){
+    root.innerHTML = `
+      <div style="max-width:360px;margin:80px auto;text-align:center;color:var(--text-muted);font-size:13px;">
+        <div class="brand-mark" style="justify-content:center;margin-bottom:10px;">
+          <span class="brand-icon">💧</span>
+          <span class="brand-word"><span class="brand-part-a">Aqua</span><span class="brand-part-b">CheckOffice</span></span>
+        </div>
+        Проверяем вход…
+      </div>`;
+  } else if(state.mode==='login'){
     root.innerHTML = renderLoginScreen();
   } else if(state.mode==='password'){
     root.innerHTML = renderPasswordScreen();
@@ -4627,4 +4665,32 @@ function performRender(){
   lastRenderedFocusId = (focusedNow && focusedNow.id && root.contains(focusedNow)) ? focusedNow.id : null;
 }
 
+// Восстановление ранее выполненного входа при загрузке страницы. Пока идёт проверка, вместо формы
+// входа показывается заглушка — иначе у уже авторизованного сотрудника экран логина мелькал бы.
+async function restoreSessionOnStart(){
+  if(!PILOT_ONLY || !sb){ state.authRestoring = false; return; }
+  try{
+    const { data } = await sb.auth.getSession();
+    const session = data && data.session;
+    if(session && session.user){
+      if(sessionIdleTooLong()){
+        try{ await sb.auth.signOut(); } catch(e){}
+        forgetSession();
+      } else {
+        await finishLiveLogin(session.user.id);
+        touchSession();
+      }
+    }
+  } catch(e){
+    // профиль не найден, нет сети и т.п. — просто остаёмся на обычном экране входа
+    state.live = false;
+    state.appUser = null;
+    state.authError = (e && e.message) ? humanizeAuthError(e.message) : '';
+  }
+  state.authRestoring = false;
+  render();
+}
+
+state.authRestoring = PILOT_ONLY && !!sb;   // до окончания проверки форму входа не показываем
 render();
+restoreSessionOnStart();
