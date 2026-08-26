@@ -4500,8 +4500,42 @@ function renderPreviewShell(inner, role){
   `;
 }
 
+// ---------- Меню сотрудника (кружок в правом верхнем углу) ----------
+// Раньше «Вошли как… / Сменить пароль / Выйти» жили в сайдбаре. На телефоне сайдбар
+// разворачивается сверху, и этот блок занимал половину экрана до того, как начнётся содержимое.
+// Теперь это кружок с инициалами: занимает угол, раскрывается по нажатию.
+function userInitials(name){
+  const parts = String(name||'').trim().split(/\s+/).filter(Boolean);
+  if(parts.length===0) return '?';
+  return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
+}
+
+function toggleUserMenu(){ state.userMenuOpen = !state.userMenuOpen; render(); }
+function closeUserMenu(){ if(state.userMenuOpen){ state.userMenuOpen = false; render(); } }
+
+function renderUserMenu(){
+  if(!state.live || !state.appUser) return '';
+  const u = state.appUser;
+  const safeName = (u.name||'').replace(/"/g,'&quot;');
+  return `
+    ${state.userMenuOpen ? `<div class="user-menu-backdrop" onclick="closeUserMenu()"></div>` : ''}
+    <div class="user-menu">
+      <button class="user-avatar" onclick="toggleUserMenu()" title="${safeName}" aria-label="Меню сотрудника">${userInitials(u.name)}</button>
+      ${state.userMenuOpen ? `
+        <div class="user-menu-panel">
+          <div class="user-menu-name">${u.name||''}</div>
+          <div class="user-menu-role">${u.role||''}</div>
+          <button class="user-menu-item" onclick="goChangePassword()">Сменить пароль</button>
+          <button class="user-menu-item" onclick="doLogout()">Выйти из рабочего режима</button>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
 function renderShellFull(inner){
   return `
+    ${renderUserMenu()}
     <div class="app">
       <aside class="sidebar">
         <div class="brand-mark">
@@ -4510,13 +4544,7 @@ function renderShellFull(inner){
         </div>
         <div class="subtitle">Сервис управления проверками</div>
         <nav id="roleNav">${renderConsoleNav()}</nav>
-        ${state.live ? `
-        <div class="nav-note" style="display:block;">
-          ${state.appUser ? `Вошли как: <b style="color:#f0f0f0;">${state.appUser.name}</b><br>${state.appUser.role}<br><br>` : ''}
-          <a onclick="goChangePassword()">Сменить пароль</a><br><br>
-          <a onclick="doLogout()">← Выйти из рабочего режима</a>
-        </div>
-        ` : PILOT_ONLY ? `` : `
+        ${state.live ? `` : PILOT_ONLY ? `` : `
         <div class="nav-note">Кликабельный демо-макет на тестовых данных — без реальной базы и сервера.</div>
         <div class="console-demo-links">
           <b style="color:#f0f0f0;">Демо-просмотр телефонных экранов:</b><br>
