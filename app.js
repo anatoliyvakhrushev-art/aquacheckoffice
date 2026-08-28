@@ -1437,18 +1437,22 @@ function itemWeight(it){
 // «Общие комментарии по проверке», вес 0). Требование ТЗ п.3.2 про текстовый тип ответа.
 function isTextItem(it){ return !!it && it.type === 'text'; }
 
-// Пункт со шкалой 1–5 (ТЗ п.3.2, «тип ответа: шкала»). Нужен там, где «да/нет» слишком грубо:
+// Пункт со шкалой 0–5 (ТЗ п.3.2, «тип ответа: шкала»). Нужен там, где «да/нет» слишком грубо:
 // качество помытых машин, чистота территории — это степень, а не факт. В балл идёт доля от
-// максимума: оценка 4 из 5 даёт 80% веса пункта.
+// максимума: оценка 4 из 5 даёт 80% веса пункта, 0 — ноль (полный провал, а не «минимум»).
 function isScaleItem(it){ return !!it && it.type === 'scale'; }
+const SCALE_MIN = 0;
 const SCALE_MAX = 5;
-// Оценка, ниже которой пункт считается замечанием: требует комментария и заводит нарушение,
-// как ответ «Нет». Иначе низкая оценка осталась бы цифрой без объяснения и без работы по ней.
+const SCALE_STEPS = [0,1,2,3,4,5];
+// Оценка, до которой включительно пункт считается замечанием: требует фото с комментарием и
+// заводит нарушение, как ответ «Нет». Иначе низкая оценка осталась бы цифрой без объяснения
+// и без работы по ней.
 const SCALE_PROBLEM_AT = 2;
 
 function scaleValue(answer){
+  if(answer===null || answer===undefined || answer==='') return null;
   const n = Number(answer);
-  return (isFinite(n) && n>=1 && n<=SCALE_MAX) ? n : null;
+  return (isFinite(n) && n>=SCALE_MIN && n<=SCALE_MAX) ? n : null;
 }
 
 // Итоговый балл проверки: доля веса пройденных пунктов от веса всех отвеченных.
@@ -1468,9 +1472,10 @@ function computeChecklistScore(items, answers){
     const w = itemWeight(it);
     totalWeight += w;
     if(isScaleItem(it)){
-      // шкала даёт долю веса: оценка 4 из 5 — это 80% пункта, а не «сдано / не сдано»
+      // шкала даёт долю веса: оценка 4 из 5 — это 80% пункта, а не «сдано / не сдано»;
+      // ноль осознанно даёт ноль веса, поэтому сравниваем с null, а не проверяем «истинность»
       const v = scaleValue(answerOf(idx));
-      if(v) passedWeight += w * (v / SCALE_MAX);
+      if(v!==null) passedWeight += w * (v / SCALE_MAX);
     } else if(answerOf(idx) === 'yes'){
       passedWeight += w;
     }
@@ -2138,12 +2143,12 @@ function renderChecklistForm(){
                 ${it.critical?'<span class="tag" style="color:var(--danger)">критический пункт</span>':''}
                 ${it.photo?'<span class="tag">фото обязательно</span>':''}
                 ${itemWeight(it)>1?`<span class="tag" style="color:var(--primary)">вес ×${itemWeight(it)}</span>`:''}
-                ${isScaleItem(it)?`<span class="tag">оценка 1–${SCALE_MAX}</span>`:''}
+                ${isScaleItem(it)?`<span class="tag">оценка ${SCALE_MIN}–${SCALE_MAX}</span>`:''}
               </div>
             </div>
             <div class="answer-toggle">
               ${isScaleItem(it) ? `
-                ${[1,2,3,4,5].map(n=>`<button class="toggle-btn scale ${String(a.answer)===String(n)?'active':''}" onclick="setAnswer(${idx},'${n}')">${n}</button>`).join('')}
+                ${SCALE_STEPS.map(n=>`<button class="toggle-btn scale ${String(a.answer)===String(n)?'active':''}" onclick="setAnswer(${idx},'${n}')">${n}</button>`).join('')}
                 <button class="toggle-btn na ${a.answer==='na'?'active':''}" title="Неактуально: на этом объекте такого нет — пункт не влияет на балл" onclick="setAnswer(${idx},'na')">Н/А</button>
               ` : `
                 <button class="toggle-btn yes ${a.answer==='yes'?'active':''}" onclick="setAnswer(${idx},'yes')">Да</button>
@@ -2201,6 +2206,7 @@ function renderChecklistForm(){
       <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">
         Если отвечаете «Нет» — обязательно прикрепите фото и опишите проблему в комментарии. К ответу «Да» фото можно приложить по желанию.<br>
         «Н/А» (неактуально) — если на этом объекте такого узла нет (например, ворот): пункт не учитывается в балле.
+        ${items.some(isScaleItem) ? `<br>Пункты с оценкой ${SCALE_MIN}–${SCALE_MAX}: ${SCALE_MAX} — без замечаний, ${SCALE_MIN} — полный провал. Оценка ${SCALE_PROBLEM_AT} и ниже требует фото и комментария, как ответ «Нет».` : ''}
       </div>
       ${hasGroups ? `
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
@@ -3644,7 +3650,7 @@ function renderItemRow(templateId, key, idx, it){
       <input type="text" value="${(it.text||'').replace(/"/g,'&quot;')}" placeholder="Впишите формулировку пункта. «Раздел — пункт» соберёт блок" style="flex:1;min-width:180px;" onchange="updateItemText(${templateId},'${key}',${idx},this.value)">
       <select title="Тип ответа" onchange="updateItemType(${templateId},'${key}',${idx},this.value)">
         <option value="yesno" ${!it.type?'selected':''}>Да/Нет</option>
-        <option value="scale" ${it.type==='scale'?'selected':''}>Оценка 1–5</option>
+        <option value="scale" ${it.type==='scale'?'selected':''}>Оценка 0–5</option>
         <option value="text" ${it.type==='text'?'selected':''}>Только комментарий</option>
       </select>
       <label style="font-size:11px;display:flex;align-items:center;gap:3px;white-space:nowrap;" title="Вес пункта в итоговом балле: 2 значит «весит как два обычных пункта»">
