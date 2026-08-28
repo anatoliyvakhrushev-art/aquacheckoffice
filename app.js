@@ -1437,6 +1437,20 @@ function itemWeight(it){
 // «Общие комментарии по проверке», вес 0). Требование ТЗ п.3.2 про текстовый тип ответа.
 function isTextItem(it){ return !!it && it.type === 'text'; }
 
+// Пункт со шкалой 1–5 (ТЗ п.3.2, «тип ответа: шкала»). Нужен там, где «да/нет» слишком грубо:
+// качество помытых машин, чистота территории — это степень, а не факт. В балл идёт доля от
+// максимума: оценка 4 из 5 даёт 80% веса пункта.
+function isScaleItem(it){ return !!it && it.type === 'scale'; }
+const SCALE_MAX = 5;
+// Оценка, ниже которой пункт считается замечанием: требует комментария и заводит нарушение,
+// как ответ «Нет». Иначе низкая оценка осталась бы цифрой без объяснения и без работы по ней.
+const SCALE_PROBLEM_AT = 2;
+
+function scaleValue(answer){
+  const n = Number(answer);
+  return (isFinite(n) && n>=1 && n<=SCALE_MAX) ? n : null;
+}
+
 // Итоговый балл проверки: доля веса пройденных пунктов от веса всех отвеченных.
 // answers — массив либо объектов {answer}, либо самих значений 'yes'/'no'.
 function computeChecklistScore(items, answers){
@@ -1453,7 +1467,13 @@ function computeChecklistScore(items, answers){
     if(answerOf(idx) === 'na') return;
     const w = itemWeight(it);
     totalWeight += w;
-    if(answerOf(idx) === 'yes') passedWeight += w;
+    if(isScaleItem(it)){
+      // шкала даёт долю веса: оценка 4 из 5 — это 80% пункта, а не «сдано / не сдано»
+      const v = scaleValue(answerOf(idx));
+      if(v) passedWeight += w * (v / SCALE_MAX);
+    } else if(answerOf(idx) === 'yes'){
+      passedWeight += w;
+    }
   });
   if(totalWeight === 0) return 0;
   return Math.round((passedWeight / totalWeight) * 100);
@@ -1970,15 +1990,22 @@ function restartChecklist(){
   render();
 }
 
-// Группировка пунктов по блокам «Пост N — …»: в попостовом чек-листе МСО их бывает 6–9 по 20
-// пунктов, и listать 130 строк подряд на телефоне неудобно. Пункты без такого префикса
-// (общие вопросы, комментарий) собираются в группу без заголовка.
+// Разбивка чек-листа на сворачиваемые блоки. Блок — это то, что стоит в тексте пункта перед
+// тире: «Пост 3 — Стены», «Зал — Пол без сколов», «Территория — Урны чистые». Так раздел
+// задаётся в самой формулировке пункта, без отдельной сущности в шаблоне: достаточно назвать
+// пункты одинаковым началом, и они соберутся в блок. Пункты без такого начала идут как есть.
+const GROUP_PREFIX_RE = /^(.{2,40}?)\s+—\s+/;
+
+function checklistGroupTitle(text){
+  const m = GROUP_PREFIX_RE.exec(text || '');
+  return m ? m[1].trim() : null;
+}
+
 function checklistGroups(items){
   const groups = [];
   let current = null;
   items.forEach((it, idx)=>{
-    const m = /^(Пост\s*\d+|Бокс\s*\d+)\s*—\s*/.exec(it.text || '');
-    const title = m ? m[1] : null;
+    const title = checklistGroupTitle(it.text);
     if(!current || current.title !== title){
       current = { title, indexes: [] };
       groups.push(current);
@@ -2005,8 +2032,8 @@ function setAllChecklistGroups(collapsed){
 function focusChecklistItem(idx){
   const it = checklistDraft && checklistDraft.items[idx];
   if(!it) return;
-  const m = /^(Пост\s*\d+|Бокс\s*\d+)\s*—\s*/.exec(it.text || '');
-  if(m && state.collapsedGroups[m[1]]) state.collapsedGroups[m[1]] = false;
+  const title = checklistGroupTitle(it.text);
+  if(title && state.collapsedGroups[title]) state.collapsedGroups[title] = false;
   state.highlightItem = idx;
   render();
   // прокрутка — после перерисовки, иначе элемента ещё нет в DOM
@@ -2014,6 +2041,60 @@ function focusChecklistItem(idx){
     const el = document.getElementById('chk-item-'+idx);
     if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
   }, 60);
+}
+
+// Все замечания проверки одним списком: ответы «Нет» и низкие оценки шкалы вместе с их
+// комментариями. Иначе, чтобы понять итог проверки на 130 пунктов, приходилось листать весь
+// чек-лист и выискивать красные пункты. Используется и при заполнении, и при просмотре в журнале.
+function checklistIssues(items, answers){
+  const out = [];
+  (items||[]).forEach((it, idx)=>{
+    const a = answers[idx];
+    if(!a) return;
+    const answer = (a && typeof a === 'object') ? a.answer : a;
+    const comment = (a && typeof a === 'object') ? (a.comment||'') : '';
+    if(isTextItem(it)) return;
+    const v = isScaleItem(it) ? scaleValue(answer) : null;
+    const isNo = answer === 'no';
+    const isLowScore = v !== null && v <= SCALE_PROBLEM_AT;
+    if(!isNo && !isLowScore) return;
+    out.push({
+      idx,
+      text: it.text,
+      comment: comment.trim(),
+      score: v,
+      critical: !!it.critical,
+      photos: (a.photos || []).filter(p=>p && p.path).length
+    });
+  });
+  return out;
+}
+
+function renderIssuesSummary(issues, opts){
+  const o = opts || {};
+  if(issues.length===0){
+    return `<div class="card"><h3>Замечания по проверке</h3><div class="empty-state">Замечаний нет — все пункты в порядке.</div></div>`;
+  }
+  return `
+    <div class="card" style="border-color:var(--danger);">
+      <h3>Замечания по проверке <span class="muted">(${issues.length})</span></h3>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px;">Собрано автоматически из пунктов с ответом «Нет» и низкой оценкой — можно переслать управляющему целиком.</div>
+      ${issues.map(is=>`
+        <div style="padding:8px 0;border-top:1px solid var(--border);">
+          <div style="font-size:13px;font-weight:600;">
+            ${is.text}
+            ${is.score!==null ? `<span class="badge badge-danger" style="margin-left:6px;">оценка ${is.score}/${SCALE_MAX}</span>` : ''}
+            ${is.critical ? `<span class="tag" style="color:var(--danger)">критический</span>` : ''}
+          </div>
+          <div style="font-size:12.5px;color:${is.comment?'var(--text)':'var(--text-muted)'};margin-top:3px;">
+            ${is.comment ? '💬 '+is.comment.replace(/</g,'&lt;') : 'комментарий не заполнен'}
+            ${is.photos ? ` · фото: ${is.photos}` : ''}
+          </div>
+          ${o.clickable ? `<a onclick="focusChecklistItem(${is.idx})" style="font-size:12px;cursor:pointer;">перейти к пункту №${is.idx+1}</a>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
 }
 
 function renderChecklistForm(){
@@ -2029,39 +2110,51 @@ function renderChecklistForm(){
         const it = items[idx];
         const a = checklistDraft.answers[idx];
         const highlighted = state.highlightItem===idx;
+        // внутри блока не повторяем его название: в блоке «Пост 3» пункт читается как «Стены»
+        const groupTitle = checklistGroupTitle(it.text);
+        const shownText = groupTitle ? String(it.text).replace(GROUP_PREFIX_RE, '') : it.text;
 
         // Пункт-комментарий: только текстовое поле, без «Да/Нет», в балл не входит
         if(isTextItem(it)) return `
         <div class="checklist-item ${highlighted?'item-highlight':''}" id="chk-item-${idx}">
-          <div class="qtext">${idx+1}. ${it.text}</div>
+          <div class="qtext">${idx+1}. ${shownText}</div>
           <div style="margin-top:8px;">
             <textarea id="opComment${idx}" rows="3" data-quiet-render="1" style="width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:7px;padding:6px 9px;font-family:inherit;" placeholder="Опишите словами (необязательно)" oninput="setComment(${idx}, this.value)" onblur="commitComment()">${(a.comment||'').replace(/</g,'&lt;')}</textarea>
           </div>
         </div>`;
 
+        // Низкая оценка по шкале — такое же замечание, как ответ «Нет»: нужны фото и объяснение,
+        // иначе в журнале останется цифра «2» без указания, что именно не так.
+        const scaleProblem = isScaleItem(it) && scaleValue(a.answer) !== null && scaleValue(a.answer) <= SCALE_PROBLEM_AT;
         // при «Н/А» проверять нечего — ни фото, ни комментарий не требуются
-        const photoRequired = a.answer!=='na' && (it.photo || a.answer==='no');
-        // фото можно приложить и к ответу «Да» — например, зафиксировать, что узел в порядке
-        const photoAllowed = a.answer==='yes' || a.answer==='no';
-        const commentRequired = a.answer==='no';
+        const photoRequired = a.answer!=='na' && (it.photo || a.answer==='no' || scaleProblem);
+        const commentRequired = a.answer==='no' || scaleProblem;
         return `
         <div class="checklist-item ${highlighted?'item-highlight':''}" id="chk-item-${idx}">
           <div class="row">
             <div>
-              <div class="qtext">${idx+1}. ${it.text}</div>
+              <div class="qtext">${idx+1}. ${shownText}</div>
               <div class="tags">
                 ${it.critical?'<span class="tag" style="color:var(--danger)">критический пункт</span>':''}
                 ${it.photo?'<span class="tag">фото обязательно</span>':''}
                 ${itemWeight(it)>1?`<span class="tag" style="color:var(--primary)">вес ×${itemWeight(it)}</span>`:''}
+                ${isScaleItem(it)?`<span class="tag">оценка 1–${SCALE_MAX}</span>`:''}
               </div>
             </div>
             <div class="answer-toggle">
-              <button class="toggle-btn yes ${a.answer==='yes'?'active':''}" onclick="setAnswer(${idx},'yes')">Да</button>
-              <button class="toggle-btn no ${a.answer==='no'?'active':''}" onclick="setAnswer(${idx},'no')">Нет</button>
-              <button class="toggle-btn na ${a.answer==='na'?'active':''}" title="Неактуально: на этом объекте такого нет — пункт не влияет на балл" onclick="setAnswer(${idx},'na')">Н/А</button>
+              ${isScaleItem(it) ? `
+                ${[1,2,3,4,5].map(n=>`<button class="toggle-btn scale ${String(a.answer)===String(n)?'active':''}" onclick="setAnswer(${idx},'${n}')">${n}</button>`).join('')}
+                <button class="toggle-btn na ${a.answer==='na'?'active':''}" title="Неактуально: на этом объекте такого нет — пункт не влияет на балл" onclick="setAnswer(${idx},'na')">Н/А</button>
+              ` : `
+                <button class="toggle-btn yes ${a.answer==='yes'?'active':''}" onclick="setAnswer(${idx},'yes')">Да</button>
+                <button class="toggle-btn no ${a.answer==='no'?'active':''}" onclick="setAnswer(${idx},'no')">Нет</button>
+                <button class="toggle-btn na ${a.answer==='na'?'active':''}" title="Неактуально: на этом объекте такого нет — пункт не влияет на балл" onclick="setAnswer(${idx},'na')">Н/А</button>
+              `}
             </div>
           </div>
-          ${(photoRequired || photoAllowed) ? (()=>{
+          ${(()=>{
+            // Блок фото показывается ВСЕГДА, а не появляется после выбора ответа: иначе при каждом
+            // нажатии «Да/Нет» содержимое ниже сдвигалось, и следующий пункт уезжал из-под пальца.
             const photos = a.photos || [];
             return `
             <div style="margin-top:10px;">
@@ -2088,7 +2181,7 @@ function renderChecklistForm(){
               `}
               ${a.photoError ? `<div style="margin-top:6px;font-size:12px;color:var(--danger);">${a.photoError}</div>` : ''}
             </div>
-          `;})() : ''}
+          `;})()}
           ${commentRequired ? `
             <div style="margin-top:8px;">
               <textarea id="opComment${idx}" rows="2" data-quiet-render="1" style="width:100%;box-sizing:border-box;border:1px solid ${a.comment&&a.comment.trim()?'var(--border)':'var(--danger)'};border-radius:7px;padding:6px 9px;font-size:12.5px;font-family:inherit;" placeholder="Опишите, что не так (обязательно)" oninput="setComment(${idx}, this.value)" onblur="commitComment()">${a.comment.replace(/</g,'&lt;')}</textarea>
@@ -2134,7 +2227,12 @@ function renderChecklistForm(){
           ${collapsed ? '' : g.indexes.map(renderItem).join('')}
         `;
       }).join('')}
-      <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
+    </div>
+
+    ${renderIssuesSummary(checklistIssues(items, checklistDraft.answers), {clickable:true})}
+
+    <div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn" ${(photoUploading||state.checklistBusy)?'disabled':''} onclick="submitChecklist()">${state.checklistBusy?'Сохраняем…':(photoUploading?'Ждём загрузку фото…':'Отправить проверку')}</button>
         <button class="btn btn-secondary" ${state.checklistBusy?'disabled':''} onclick="cancelChecklist()" title="Ответы сохранятся, можно вернуться позже">Прервать</button>
         <button class="btn btn-secondary" ${state.checklistBusy?'disabled':''} onclick="restartChecklist()" title="Удалить заполненное и начать этот чек-лист заново">Начать заново</button>
@@ -2164,9 +2262,11 @@ async function submitChecklist(){
       focusChecklistItem(noAnswer);
       return;
     }
-    const noPhoto = its.findIndex((it,idx)=> !isTextItem(it) && ans[idx].answer!=='na' && (it.photo || ans[idx].answer==='no') && !(ans[idx].photos && ans[idx].photos.length));
+    // низкая оценка по шкале требует того же, что ответ «Нет» — фото и объяснения
+    const isProblem = (it, a)=> a.answer==='no' || (isScaleItem(it) && scaleValue(a.answer)!==null && scaleValue(a.answer)<=SCALE_PROBLEM_AT);
+    const noPhoto = its.findIndex((it,idx)=> !isTextItem(it) && ans[idx].answer!=='na' && (it.photo || isProblem(it, ans[idx])) && !(ans[idx].photos && ans[idx].photos.length));
     if(noPhoto>=0){ showBanner('Пункт №'+(noPhoto+1)+': нужно приложить фото.'); focusChecklistItem(noPhoto); return; }
-    const noComment = its.findIndex((it,idx)=> !isTextItem(it) && ans[idx].answer==='no' && !(ans[idx].comment && ans[idx].comment.trim()));
+    const noComment = its.findIndex((it,idx)=> !isTextItem(it) && isProblem(it, ans[idx]) && !(ans[idx].comment && ans[idx].comment.trim()));
     if(noComment>=0){ showBanner('Пункт №'+(noComment+1)+': опишите проблему в комментарии.'); focusChecklistItem(noComment); return; }
   }
 
@@ -2203,7 +2303,14 @@ async function submitChecklist(){
       // Одним запросом на все проваленные пункты сразу, а не по одной вставке в цикле —
       // так на ошибку сети/сервера приходится один ретрай на всю проверку, а не риск того, что
       // часть нарушений тихо не сохранится, пока балл проверки уже показывает их как найденные.
-      const failedItems = items.filter((it,idx)=>checklistDraft.answers[idx].answer==='no');
+      // нарушение заводится и по низкой оценке шкалы — иначе «2 из 5» осталась бы цифрой,
+      // по которой никто не назначил работу
+      const failedItems = items.filter((it,idx)=>{
+        const a = checklistDraft.answers[idx];
+        if(a.answer==='no') return true;
+        const v = isScaleItem(it) ? scaleValue(a.answer) : null;
+        return v!==null && v<=SCALE_PROBLEM_AT;
+      });
       if(failedItems.length>0){
         const { data: vData, error: vErr } = await sbRetry(()=> sb.from('violations').insert(
           failedItems.map(it=>({ point_id: pointId, item: it.text, critical: it.critical, status:'новое' }))
@@ -2373,7 +2480,7 @@ function managerActionCell(v){
             <option value="">Ответственный…</option>
             ${sortedUsers.map(u=>`<option value="${u.id}" ${v._assignUserId===u.id?'selected':''}>${u.name} (${u.role})</option>`).join('')}
           </select>
-          <input type="date" value="${v._assignDeadline||''}" onchange="setViolationAssignField(${v.id},'Deadline',this.value)">
+          <input type="date" data-quiet-render="1" value="${v._assignDeadline||''}" onchange="setViolationAssignField(${v.id},'Deadline',this.value)">
           <div style="display:flex;gap:4px;">
             <button class="btn btn-sm" onclick="submitAssignViolation(${v.id})">Назначить</button>
             <button class="btn btn-sm btn-secondary" onclick="assignViolation(${v.id})">Отмена</button>
@@ -2721,9 +2828,9 @@ function renderAdminAnalytics(){
             <button class="btn btn-sm btn-secondary" onclick="setAnalyticsPeriodPreset(30)">30 дней</button>
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-            <input type="date" value="${from||''}" onchange="setAdminAnalyticsFilter('From', this.value)" oninput="setAdminAnalyticsFilter('From', this.value)">
+            <input type="date" data-quiet-render="1" value="${from||''}" onchange="setAdminAnalyticsFilter('From', this.value)">
             <span style="font-size:11px;color:var(--text-muted);">—</span>
-            <input type="date" value="${to||''}" onchange="setAdminAnalyticsFilter('To', this.value)" oninput="setAdminAnalyticsFilter('To', this.value)">
+            <input type="date" data-quiet-render="1" value="${to||''}" onchange="setAdminAnalyticsFilter('To', this.value)">
           </div>
         </div>
       </div>
@@ -2791,11 +2898,15 @@ function renderInspectionDetail(insp){
   const items = insp.items || [];
   const t = templateById(insp.templateId);
   const p = pointById(insp.pointId);
-  const failedCount = items.filter(it=>it.answer==='no').length;
-  const visibleItems = state.inspShowOnlyViolations ? items.filter(it=>it.answer==='no') : items;
+  // ответы уже лежат внутри самих items, поэтому передаём их же как источник ответов
+  const issues = checklistIssues(items, items);
+  const failedCount = issues.length;
+  const isProblemItem = (it)=> it.answer==='no' || (isScaleItem(it) && scaleValue(it.answer)!==null && scaleValue(it.answer)<=SCALE_PROBLEM_AT);
+  const visibleItems = state.inspShowOnlyViolations ? items.filter(isProblemItem) : items;
 
   return `
     <div style="padding:12px 4px;">
+      ${issues.length ? renderIssuesSummary(issues, {clickable:false}) : ''}
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
         <div style="font-size:12px;color:var(--text-muted);">
           ${p ? p.name : ''} · ${t ? t.name : 'чек-лист не найден'} · пунктов: ${items.length}, нарушений: ${failedCount}
@@ -2827,7 +2938,10 @@ function renderInspectionDetail(insp){
                   ? `<span class="badge badge-neutral">комментарий</span>`
                   : it.answer==='na'
                     ? `<span class="badge badge-neutral" title="Неактуально: на объекте такого узла нет — в балл не входит">Н/А</span>`
-                    : `<span class="badge ${it.answer==='yes'?'badge-success':'badge-danger'}">${it.answer==='yes'?'Да':'Нет'}</span>`}
+                    : isScaleItem(it)
+                      ? (()=>{ const v = scaleValue(it.answer); const cls = v===null ? 'badge-neutral' : (v<=SCALE_PROBLEM_AT ? 'badge-danger' : (v>=4 ? 'badge-success' : 'badge-warning'));
+                               return `<span class="badge ${cls}">${v===null?'—':v+'/'+SCALE_MAX}</span>`; })()
+                      : `<span class="badge ${it.answer==='yes'?'badge-success':'badge-danger'}">${it.answer==='yes'?'Да':'Нет'}</span>`}
               </div>
               ${it.answer==='no' && it.comment ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);background:var(--bg);border-radius:7px;padding:6px 9px;">💬 ${it.comment}</div>` : ''}
               ${(()=>{
@@ -3178,7 +3292,11 @@ function renderAdminPlanning(){
           </div>
           <div>
             <label style="font-size:11px;color:var(--text-muted);">${state.planningIsRecurring ? 'Дата первой проверки' : 'Дата проверки'}</label>
-            <input type="date" style="width:100%;margin-top:2px;" value="${state.planningDueDate||''}" onchange="setPlanningField('DueDate', this.value)">
+            <!-- data-quiet-render: пока календарь открыт, экран не должен перерисовываться.
+                 Иначе посторонняя перерисовка (например, по таймеру исчезающего уведомления)
+                 пересоздаёт поле, и браузер применяет подсвеченную в календаре дату — сегодняшнюю,
+                 хотя пользователь ничего не выбирал. -->
+            <input type="date" data-quiet-render="1" style="width:100%;margin-top:2px;" value="${state.planningDueDate||''}" onchange="setPlanningField('DueDate', this.value)">
           </div>
         </div>
 
@@ -3393,9 +3511,9 @@ function renderAdminInspections(){
             <button class="btn btn-sm btn-secondary" onclick="setInspPeriodPreset(30)">30 дней</button>
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-            <input type="date" value="${from||''}" onchange="setInspFilter('From', this.value)" oninput="setInspFilter('From', this.value)">
+            <input type="date" data-quiet-render="1" value="${from||''}" onchange="setInspFilter('From', this.value)">
             <span style="font-size:11px;color:var(--text-muted);">—</span>
-            <input type="date" value="${to||''}" onchange="setInspFilter('To', this.value)" oninput="setInspFilter('To', this.value)">
+            <input type="date" data-quiet-render="1" value="${to||''}" onchange="setInspFilter('To', this.value)">
           </div>
         </div>
       </div>
@@ -3523,7 +3641,16 @@ function renderTemplateSummary(t){
 function renderItemRow(templateId, key, idx, it){
   return `
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-      <input type="text" value="${(it.text||'').replace(/"/g,'&quot;')}" placeholder="Впишите формулировку пункта" style="flex:1;" onchange="updateItemText(${templateId},'${key}',${idx},this.value)">
+      <input type="text" value="${(it.text||'').replace(/"/g,'&quot;')}" placeholder="Впишите формулировку пункта. «Раздел — пункт» соберёт блок" style="flex:1;min-width:180px;" onchange="updateItemText(${templateId},'${key}',${idx},this.value)">
+      <select title="Тип ответа" onchange="updateItemType(${templateId},'${key}',${idx},this.value)">
+        <option value="yesno" ${!it.type?'selected':''}>Да/Нет</option>
+        <option value="scale" ${it.type==='scale'?'selected':''}>Оценка 1–5</option>
+        <option value="text" ${it.type==='text'?'selected':''}>Только комментарий</option>
+      </select>
+      <label style="font-size:11px;display:flex;align-items:center;gap:3px;white-space:nowrap;" title="Вес пункта в итоговом балле: 2 значит «весит как два обычных пункта»">
+        вес
+        <input type="number" min="0" max="20" step="1" value="${itemWeight(it)}" style="width:52px;" onchange="updateItemWeight(${templateId},'${key}',${idx},this.value)">
+      </label>
       <label style="font-size:11px;display:flex;align-items:center;gap:3px;white-space:nowrap;"><input type="checkbox" ${it.critical?'checked':''} onchange="toggleItemFlag(${templateId},'${key}',${idx},'critical')"> критично</label>
       <label style="font-size:11px;display:flex;align-items:center;gap:3px;white-space:nowrap;"><input type="checkbox" ${it.photo?'checked':''} onchange="toggleItemFlag(${templateId},'${key}',${idx},'photo')"> фото</label>
       <button class="btn btn-sm btn-secondary" onclick="removeItem(${templateId},'${key}',${idx})" title="Удалить пункт">✕</button>
@@ -3753,6 +3880,23 @@ function updateTemplateMultiPost(id, checked){
 function updateItemText(templateId, key, idx, value){
   templateById(templateId)[key][idx].text = value;
 }
+
+function updateItemType(templateId, key, idx, value){
+  const it = templateById(templateId)[key][idx];
+  if(value==='yesno') delete it.type; else it.type = value;
+  // пункт-комментарий не оценивается, поэтому и вес ему не нужен
+  if(value==='text') it.weight = 0;
+  else if(!(Number(it.weight)>0)) it.weight = 1;
+  render();
+}
+
+// Вес пункта раньше можно было задать только через SQL: в конструкторе поля не было, и шаблоны,
+// собранные в интерфейсе, считались как «все пункты равны» — балл расходился с привычным.
+function updateItemWeight(templateId, key, idx, value){
+  const n = Math.max(0, Math.min(20, Math.round(Number(value)||0)));
+  templateById(templateId)[key][idx].weight = n;
+  render();
+}
 function toggleItemFlag(templateId, key, idx, flag){
   const it = templateById(templateId)[key][idx];
   it[flag] = !it[flag];
@@ -3765,7 +3909,7 @@ function removeItem(templateId, key, idx){
 function addItem(templateId, key){
   // текст пустой, а подсказка живёт в placeholder — иначе она попадала в поле как настоящее
   // значение, и формулировка впечатывалась внутрь этой подсказки
-  templateById(templateId)[key].push({text:'', critical:false, photo:false});
+  templateById(templateId)[key].push({text:'', critical:false, photo:false, weight:1});
   render();
 }
 

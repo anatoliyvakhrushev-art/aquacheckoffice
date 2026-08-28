@@ -232,6 +232,9 @@
   .toggle-btn.no.active{background:var(--danger-bg);border-color:var(--danger);color:var(--danger);}
   /* «Н/П» — нейтральный, не красный: это не нарушение, а отсутствие узла на объекте */
   .toggle-btn.na.active{background:var(--neutral-bg);border-color:var(--text-muted);color:var(--text-muted);font-weight:600;}
+  /* шкала 1–5: кнопки уже, чем «Да/Нет», иначе шесть кнопок не влезают в строку на телефоне */
+  .toggle-btn.scale{min-width:34px;padding:6px 8px;font-weight:600;}
+  .toggle-btn.scale.active{background:var(--primary);border-color:var(--primary);color:#fff;}
   .photo-btn{
     margin-top:10px;
     display:inline-flex;
