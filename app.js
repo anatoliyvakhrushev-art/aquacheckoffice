@@ -3714,7 +3714,8 @@ function renderTemplateSummary(t){
 function renderItemRow(templateId, key, idx, it){
   const parted = splitItemText(it.text);
   return `
-    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+    <div class="tpl-item" data-idx="${idx}" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+      <span class="tpl-drag" title="Перетащите, чтобы поменять порядок пунктов в блоке" onpointerdown="itemDragStart(event,${templateId},'${key}')">⠿</span>
       <input type="text" value="${parted.text.replace(/"/g,'&quot;')}" placeholder="${parted.group ? 'Формулировка пункта' : 'Формулировка пункта. «Раздел — пункт» соберёт блок'}" style="flex:1;min-width:180px;" onchange="updateItemText(${templateId},'${key}',${idx},this.value)">
       <select title="Тип ответа" onchange="updateItemType(${templateId},'${key}',${idx},this.value)">
         <option value="yesno" ${!it.type?'selected':''}>Да/Нет</option>
@@ -4032,6 +4033,82 @@ function addItem(templateId, key){
   render();
 }
 
+// Перетаскивание пунктов внутри блока. Порядок меняется только в своём блоке: пункты блока
+// лежат в массиве подряд, и перестановка переписывает ровно этот отрезок, не задевая соседние
+// блоки. Взяты Pointer Events, а не HTML5 drag&drop, — тот на телефоне не работает вовсе.
+let itemDrag = null;
+let itemDragTimer = null;
+
+function itemDragStart(ev, templateId, key){
+  if(ev.button && ev.button !== 0) return;   // тащим только левой кнопкой
+  const row = ev.target.closest('.tpl-item');
+  if(!row) return;
+  ev.preventDefault();                        // иначе браузер начинает выделять текст
+  itemDrag = { templateId, key, row, container: row.parentElement, lastY: ev.clientY, moved:false, dir:0 };
+  row.classList.add('tpl-dragging');
+  window.addEventListener('pointermove', itemDragMove);
+  window.addEventListener('pointerup', itemDragEnd);
+  window.addEventListener('pointercancel', itemDragEnd);
+}
+
+// Пункт переставляется прямо в DOM, без render(): перерисовка на каждое движение пересоздала
+// бы перетаскиваемую строку, и палец потерял бы её на первом же шаге.
+function itemDragPlace(){
+  const d = itemDrag;
+  if(!d) return;
+  const rows = [...d.container.querySelectorAll('.tpl-item')];
+  for(const r of rows){
+    if(r === d.row) continue;
+    const b = r.getBoundingClientRect();
+    if(d.lastY >= b.top && d.lastY <= b.bottom){
+      const before = d.lastY < b.top + b.height/2;
+      d.container.insertBefore(d.row, before ? r : r.nextSibling);
+      d.moved = true;
+      return;
+    }
+  }
+}
+
+function itemDragMove(ev){
+  if(!itemDrag) return;
+  ev.preventDefault();
+  itemDrag.lastY = ev.clientY;
+  itemDragPlace();
+
+  const edge = 70;
+  itemDrag.dir = ev.clientY < edge ? -1 : (ev.clientY > window.innerHeight - edge ? 1 : 0);
+  if(itemDrag.dir && !itemDragTimer){
+    // у края экрана палец может стоять на месте — тогда pointermove больше не приходит,
+    // и без таймера длинный блок не пролистать до нужного места
+    itemDragTimer = setInterval(()=>{
+      if(!itemDrag || !itemDrag.dir) return;
+      window.scrollBy(0, itemDrag.dir * 12);
+      itemDragPlace();   // строки уехали под пальцем — пересчитываем место заново
+    }, 16);
+  }
+}
+
+function itemDragEnd(){
+  const d = itemDrag;
+  window.removeEventListener('pointermove', itemDragMove);
+  window.removeEventListener('pointerup', itemDragEnd);
+  window.removeEventListener('pointercancel', itemDragEnd);
+  if(itemDragTimer){ clearInterval(itemDragTimer); itemDragTimer = null; }
+  itemDrag = null;
+  if(!d) return;
+  d.row.classList.remove('tpl-dragging');
+  if(!d.moved) return;   // просто нажали на ручку и отпустили — переставлять нечего
+
+  // порядок берём из DOM, а позиции в массиве — те же, что занимал блок: так перестановка
+  // остаётся внутри блока при любом его месте в списке
+  const arr = templateById(d.templateId)[d.key];
+  const order = [...d.container.querySelectorAll('.tpl-item')].map(el=>Number(el.dataset.idx));
+  const slots = [...order].sort((a,b)=>a-b);
+  const moved = order.map(i=>arr[i]);
+  slots.forEach((pos,k)=>{ arr[pos] = moved[k]; });
+  render();
+}
+
 function blankItem(group){
   return {text: joinItemText(group, ''), critical:false, photo:false, weight:1};
 }
@@ -4065,6 +4142,13 @@ function renameBlock(templateId, key, blockIdx, value){
   const { arr, block } = templateBlock(templateId, key, blockIdx);
   if(!block) return;
   const name = (value||'').trim();
+  // блок собирается по началу текста, а короче двух знаков оно не распознаётся (GROUP_PREFIX_RE) —
+  // без этой проверки название из одной буквы молча распускало бы блок
+  if(name && name.length < 2){
+    showBanner('Название блока — минимум два знака.');
+    render();
+    return;
+  }
   block.indexes.forEach(i=>{
     arr[i].text = joinItemText(name || null, splitItemText(arr[i].text).text);
   });
