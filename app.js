@@ -1455,6 +1455,15 @@ function scaleValue(answer){
   return (isFinite(n) && n>=SCALE_MIN && n<=SCALE_MAX) ? n : null;
 }
 
+// Пункт считается заполненным. Для шкалы этого мало — нужна именно выставленная оценка:
+// иначе оставшееся от прежних версий «Н/А» проскочило бы проверку полноты, а на экране
+// показывался бы прочерк.
+function isItemAnswered(it, a){
+  if(isTextItem(it)) return true;                       // комментарий необязателен
+  if(isScaleItem(it)) return scaleValue(a && a.answer) !== null;
+  return !!a && a.answer !== null && a.answer !== undefined;
+}
+
 // Итоговый балл проверки: доля веса пройденных пунктов от веса всех отвеченных.
 // answers — массив либо объектов {answer}, либо самих значений 'yes'/'no'.
 function computeChecklistScore(items, answers){
@@ -2123,7 +2132,7 @@ function renderChecklistForm(){
   const t = templateById(checklistDraft.templateId);
   const items = checklistDraft.items;
   const scored = items.filter(it=>!isTextItem(it)).length; // пункты-комментарии в счётчик не идут
-  const answeredCount = items.filter((it,idx)=>!isTextItem(it) && checklistDraft.answers[idx].answer!==null).length;
+  const answeredCount = items.filter((it,idx)=>!isTextItem(it) && isItemAnswered(it, checklistDraft.answers[idx])).length;
   const photoUploading = checklistDraft.answers.some(a=>a.photoUploading); // не отправляем, пока снимок в пути
   const groups = checklistGroups(items);
   const hasGroups = groups.some(g=>g.title);
@@ -2174,24 +2183,25 @@ function renderChecklistForm(){
           ${isScaleItem(it) ? (()=>{
             // Ползунок, а не ряд кнопок: оценка здесь степень, и тянуть один бегунок по шкале
             // быстрее, чем целиться в мелкие кнопки на телефоне.
+            // «Н/А» у шкалы нет: если пункт оценивают по степени, оценивать всегда есть что.
+            // Старые ответы «na» (шкала успела побывать с этой кнопкой) читаются как
+            // невыставленная оценка — ползунок активен, значение перезапишется при первом движении.
             const v = scaleValue(a.answer);
-            const isNa = a.answer==='na';
             const pos = v===null ? 0 : v;
             return `
-            <div class="scale-wrap ${(v===null||isNa)?'scale-empty':''}">
+            <div class="scale-wrap ${v===null?'scale-empty':''}">
               <div class="scale-head">
-                <span class="scale-value" id="scale-val-${idx}">${isNa ? 'Н/А' : (v===null ? '—' : v)}</span>
-                <button class="toggle-btn na ${isNa?'active':''}" title="Неактуально: на этом объекте такого нет — пункт не влияет на балл" onclick="setAnswer(${idx},'na')">Н/А</button>
+                <span class="scale-value" id="scale-val-${idx}">${v===null ? '—' : v}</span>
+                <span style="font-size:11.5px;color:var(--text-muted);">0 — полный провал, ${SCALE_MAX} — без замечаний</span>
               </div>
               <input type="range" class="scale-range" data-quiet-render="1"
                 min="${SCALE_MIN}" max="${SCALE_MAX}" step="1" value="${pos}"
-                ${isNa?'disabled':''}
                 oninput="previewScale(${idx}, this.value)"
                 onchange="commitScale(${idx}, this.value)"
                 onpointerup="commitScale(${idx}, this.value)"
                 onkeyup="commitScale(${idx}, this.value)">
               <div class="scale-ticks">${SCALE_STEPS.map(n=>`<span>${n}</span>`).join('')}</div>
-              ${(v===null && !isNa) ? `<div class="scale-hint">Оценка не выставлена — передвиньте ползунок</div>` : ''}
+              ${v===null ? `<div class="scale-hint">Оценка не выставлена — передвиньте ползунок</div>` : ''}
             </div>
             `;})() : ''}
           ${(()=>{
@@ -2255,8 +2265,14 @@ function renderChecklistForm(){
         if(!g.title) return g.indexes.map(renderItem).join('');
         // сводка по блоку видна и в свёрнутом виде — понятно, где ещё не закончено
         const scoredIn = g.indexes.filter(i=>!isTextItem(items[i]));
-        const answeredIn = scoredIn.filter(i=>checklistDraft.answers[i].answer!==null).length;
-        const failedIn = scoredIn.filter(i=>checklistDraft.answers[i].answer==='no').length;
+        const answeredIn = scoredIn.filter(i=>isItemAnswered(items[i], checklistDraft.answers[i])).length;
+        // в счётчике нарушений блока учитываем и низкие оценки шкалы — это тоже замечания
+        const failedIn = scoredIn.filter(i=>{
+          const a = checklistDraft.answers[i];
+          if(a.answer==='no') return true;
+          const v = isScaleItem(items[i]) ? scaleValue(a.answer) : null;
+          return v!==null && v<=SCALE_PROBLEM_AT;
+        }).length;
         const done = answeredIn===scoredIn.length;
         const collapsed = !!state.collapsedGroups[g.title];
         return `
@@ -2298,9 +2314,9 @@ async function submitChecklist(){
     // пункты-комментарии заполнять не обязательно — они не оцениваются.
     // При нехватке чего-либо сразу переходим к этому пункту: искать его глазами среди сотни
     // строк (у попостовых чек-листов их бывает 130+) — то, чего делать не должен человек.
-    const noAnswer = its.findIndex((it,idx)=> !isTextItem(it) && ans[idx].answer===null);
+    const noAnswer = its.findIndex((it,idx)=> !isTextItem(it) && !isItemAnswered(it, ans[idx]));
     if(noAnswer>=0){
-      const left = its.filter((it,idx)=> !isTextItem(it) && ans[idx].answer===null).length;
+      const left = its.filter((it,idx)=> !isTextItem(it) && !isItemAnswered(it, ans[idx])).length;
       showBanner('Не отвечено пунктов: '+left+'. Открыт первый из них — №'+(noAnswer+1)+'.');
       focusChecklistItem(noAnswer);
       return;
