@@ -3735,12 +3735,12 @@ function renderItemRow(templateId, key, idx, it){
 // Блок в редакторе — это подряд идущие пункты с одинаковым началом текста. Отдельного
 // объекта «блок» в шаблоне нет (см. splitItemText), поэтому блок адресуется своим номером
 // в списке блоков, а не именем: имена повторяются и могут содержать кавычки.
-function renderBlockEditor(t, key, blockIdx, block, blockCount){
+function renderBlockEditor(t, key, blockIdx, block, blockCount, looseLabel){
   const items = block.indexes.map(i=>renderItemRow(t.id, key, i, t[key][i])).join('');
   if(!block.title){
     return `
       <div class="tpl-block tpl-block-loose">
-        <div class="tpl-block-head"><span class="tpl-block-name-plain">Пункты вне блоков</span><span class="tpl-block-count">${block.indexes.length}</span></div>
+        <div class="tpl-block-head"><span class="tpl-block-name-plain">${looseLabel || 'Пункты вне блоков'}</span><span class="tpl-block-count">${block.indexes.length}</span></div>
         ${items}
         <button class="btn btn-sm btn-secondary" onclick="addItemToBlock(${t.id},'${key}',${blockIdx})">+ Пункт</button>
       </div>
@@ -3762,14 +3762,14 @@ function renderBlockEditor(t, key, blockIdx, block, blockCount){
   `;
 }
 
-function renderItemsEditor(t, key, title, note){
+function renderItemsEditor(t, key, title, note, looseLabel){
   const blocks = checklistGroups(t[key]);
   return `
     <div style="margin-top:12px;">
       <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:6px;">${title}</div>
       ${note ? `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">${note}</div>` : ''}
       ${t[key].length===0 ? `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">Пунктов пока нет. Блок — это раздел чек-листа («Территория», «Моечный бокс»); на заполнении он сворачивается и показывает свой счётчик.</div>` : ''}
-      ${blocks.map((b,i)=>renderBlockEditor(t, key, i, b, blocks.length)).join('')}
+      ${blocks.map((b,i)=>renderBlockEditor(t, key, i, b, blocks.length, looseLabel)).join('')}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
         <button class="btn btn-sm" onclick="addBlock(${t.id},'${key}')">+ Добавить блок</button>
         <button class="btn btn-sm btn-secondary" onclick="addItem(${t.id},'${key}')">+ Пункт вне блоков</button>
@@ -3840,8 +3840,8 @@ function renderTemplateEditor(t){
       `}
 
       ${t.multiPost ? `
-        ${renderItemsEditor(t, 'perPostItems', 'Пункты на каждый пост', 'На заполнении эти пункты сами собираются в блоки «Пост 1», «Пост 2» и так далее. Свой блок здесь останется подписью внутри пункта, отдельным разделом он не встанет.')}
-        ${renderItemsEditor(t, 'siteItems', 'Пункты на точку целиком')}
+        ${renderItemsEditor(t, 'perPostItems', 'Пункты на каждый пост', 'Эти пункты и есть блок поста: на заполнении они повторяются по числу постов объекта и встают разделами «Пост 1», «Пост 2» и так далее. Свой блок здесь останется подписью внутри пункта, отдельным разделом он не встанет.', 'Блок «Пост N» — повторяется по числу постов')}
+        ${renderItemsEditor(t, 'siteItems', 'Пункты на точку целиком', 'Проверяются один раз на всю точку. Заведите блок («Общие вопросы»), иначе на заполнении они пойдут сплошным хвостом после последнего поста, без заголовка и счётчика.')}
       ` : renderItemsEditor(t, 'items', 'Пункты чек-листа')}
 
       <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
