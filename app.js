@@ -2032,6 +2032,18 @@ function checklistGroupTitle(text){
   return m ? m[1].trim() : null;
 }
 
+// Блок и формулировка внутри одного поля text — так устроены все уже заведённые шаблоны,
+// поэтому конструктор не заводит отдельную сущность «раздел», а разбирает и снова склеивает
+// этот же текст. Старые чек-листы из базы открываются в блоках без всякой миграции.
+function splitItemText(text){
+  const m = GROUP_PREFIX_RE.exec(text || '');
+  return m ? { group: m[1].trim(), text: String(text).slice(m[0].length) } : { group: null, text: text || '' };
+}
+
+function joinItemText(group, text){
+  return group ? group + ' — ' + (text || '') : (text || '');
+}
+
 function checklistGroups(items){
   const groups = [];
   let current = null;
@@ -3677,6 +3689,7 @@ function renderAdminChecklists(){
 function renderTemplateSummary(t){
   const isGuest = t.type==='Тайный покупатель';
   const count = t.multiPost ? (t.perPostItems.length+t.siteItems.length)+' на пост-шаблон' : t.items.length;
+  const blocks = t.multiPost ? [] : checklistGroups(t.items).filter(g=>g.title);
   return `
     <div class="checklist-item">
       <div class="row">
@@ -3688,6 +3701,7 @@ function renderTemplateSummary(t){
             ${t.role ? `<span class="tag">роль: ${t.role}</span>` : ''}
             ${t.schedule ? `<span class="tag">${t.schedule.freq==='daily' ? 'ежедневно к '+t.schedule.time : t.schedule.label}</span>` : ''}
             <span class="tag">${count} пункт(ов)</span>
+            ${blocks.length ? `<span class="tag">${blocks.length} блок(ов)</span>` : ''}
             ${t.multiPost ? '<span class="tag">попостовой</span>' : ''}
           </div>
         </div>
@@ -3698,9 +3712,10 @@ function renderTemplateSummary(t){
 }
 
 function renderItemRow(templateId, key, idx, it){
+  const parted = splitItemText(it.text);
   return `
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-      <input type="text" value="${(it.text||'').replace(/"/g,'&quot;')}" placeholder="Впишите формулировку пункта. «Раздел — пункт» соберёт блок" style="flex:1;min-width:180px;" onchange="updateItemText(${templateId},'${key}',${idx},this.value)">
+      <input type="text" value="${parted.text.replace(/"/g,'&quot;')}" placeholder="${parted.group ? 'Формулировка пункта' : 'Формулировка пункта. «Раздел — пункт» соберёт блок'}" style="flex:1;min-width:180px;" onchange="updateItemText(${templateId},'${key}',${idx},this.value)">
       <select title="Тип ответа" onchange="updateItemType(${templateId},'${key}',${idx},this.value)">
         <option value="yesno" ${!it.type?'selected':''}>Да/Нет</option>
         <option value="scale" ${it.type==='scale'?'selected':''}>Оценка 0–5</option>
@@ -3717,12 +3732,48 @@ function renderItemRow(templateId, key, idx, it){
   `;
 }
 
-function renderItemsEditor(t, key, title){
+// Блок в редакторе — это подряд идущие пункты с одинаковым началом текста. Отдельного
+// объекта «блок» в шаблоне нет (см. splitItemText), поэтому блок адресуется своим номером
+// в списке блоков, а не именем: имена повторяются и могут содержать кавычки.
+function renderBlockEditor(t, key, blockIdx, block, blockCount){
+  const items = block.indexes.map(i=>renderItemRow(t.id, key, i, t[key][i])).join('');
+  if(!block.title){
+    return `
+      <div class="tpl-block tpl-block-loose">
+        <div class="tpl-block-head"><span class="tpl-block-name-plain">Пункты вне блоков</span><span class="tpl-block-count">${block.indexes.length}</span></div>
+        ${items}
+        <button class="btn btn-sm btn-secondary" onclick="addItemToBlock(${t.id},'${key}',${blockIdx})">+ Пункт</button>
+      </div>
+    `;
+  }
+  return `
+    <div class="tpl-block">
+      <div class="tpl-block-head">
+        <input type="text" class="tpl-block-name" data-quiet-render="1" value="${block.title.replace(/"/g,'&quot;')}" placeholder="Название блока"
+          onchange="renameBlock(${t.id},'${key}',${blockIdx},this.value)">
+        <span class="tpl-block-count">${block.indexes.length}</span>
+        <button class="btn btn-sm btn-secondary" ${blockIdx===0?'disabled':''} title="Выше" onclick="moveBlock(${t.id},'${key}',${blockIdx},-1)">▲</button>
+        <button class="btn btn-sm btn-secondary" ${blockIdx===blockCount-1?'disabled':''} title="Ниже" onclick="moveBlock(${t.id},'${key}',${blockIdx},1)">▼</button>
+        <button class="btn btn-sm btn-secondary" style="color:var(--danger)" title="Удалить блок вместе с пунктами" onclick="removeBlock(${t.id},'${key}',${blockIdx})">✕</button>
+      </div>
+      ${items}
+      <button class="btn btn-sm btn-secondary" onclick="addItemToBlock(${t.id},'${key}',${blockIdx})">+ Пункт в блок</button>
+    </div>
+  `;
+}
+
+function renderItemsEditor(t, key, title, note){
+  const blocks = checklistGroups(t[key]);
   return `
     <div style="margin-top:12px;">
       <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:6px;">${title}</div>
-      ${t[key].map((it,idx)=>renderItemRow(t.id, key, idx, it)).join('')}
-      <button class="btn btn-sm btn-secondary" onclick="addItem(${t.id},'${key}')">+ Добавить пункт</button>
+      ${note ? `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">${note}</div>` : ''}
+      ${t[key].length===0 ? `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">Пунктов пока нет. Блок — это раздел чек-листа («Территория», «Моечный бокс»); на заполнении он сворачивается и показывает свой счётчик.</div>` : ''}
+      ${blocks.map((b,i)=>renderBlockEditor(t, key, i, b, blocks.length)).join('')}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn btn-sm" onclick="addBlock(${t.id},'${key}')">+ Добавить блок</button>
+        <button class="btn btn-sm btn-secondary" onclick="addItem(${t.id},'${key}')">+ Пункт вне блоков</button>
+      </div>
     </div>
   `;
 }
@@ -3789,7 +3840,7 @@ function renderTemplateEditor(t){
       `}
 
       ${t.multiPost ? `
-        ${renderItemsEditor(t, 'perPostItems', 'Пункты на каждый пост')}
+        ${renderItemsEditor(t, 'perPostItems', 'Пункты на каждый пост', 'На заполнении эти пункты сами собираются в блоки «Пост 1», «Пост 2» и так далее. Свой блок здесь останется подписью внутри пункта, отдельным разделом он не встанет.')}
         ${renderItemsEditor(t, 'siteItems', 'Пункты на точку целиком')}
       ` : renderItemsEditor(t, 'items', 'Пункты чек-листа')}
 
@@ -3831,7 +3882,9 @@ async function saveTemplate(id){
   const name = (t.name||'').trim();
   if(!name){ showBanner('Укажите название чек-листа.'); return; }
   const keys = t.multiPost ? ['perPostItems','siteItems'] : ['items'];
-  const blank = keys.some(k=> (t[k]||[]).some(it=>!(it.text||'').trim()));
+  // проверяем формулировку без названия блока: у пункта «Территория — » текст непустой,
+  // но самой формулировки в нём нет
+  const blank = keys.some(k=> (t[k]||[]).some(it=>!splitItemText(it.text).text.trim()));
   if(blank){ showBanner('Есть пункты без формулировки — заполните или удалите их.'); return; }
   const totalItems = keys.reduce((n,k)=>n+(t[k]||[]).length, 0);
   if(totalItems===0){ showBanner('Добавьте хотя бы один пункт.'); return; }
@@ -3936,8 +3989,15 @@ function updateTemplateMultiPost(id, checked){
   showBanner('Переключение режима очищает пункты — заполните их заново.');
 }
 
+// В поле видна только формулировка, название блока к ней приклеивается обратно — иначе
+// правка текста пункта выкидывала бы его из блока.
 function updateItemText(templateId, key, idx, value){
-  templateById(templateId)[key][idx].text = value;
+  const arr = templateById(templateId)[key];
+  const group = splitItemText(arr[idx].text).group;
+  const typed = splitItemText(value);
+  // «Раздел — пункт», вписанное прямо в поле, по-прежнему переносит пункт в свой блок
+  arr[idx].text = typed.group ? value : joinItemText(group, value);
+  if(typed.group) render();
 }
 
 function updateItemType(templateId, key, idx, value){
@@ -3968,7 +4028,66 @@ function removeItem(templateId, key, idx){
 function addItem(templateId, key){
   // текст пустой, а подсказка живёт в placeholder — иначе она попадала в поле как настоящее
   // значение, и формулировка впечатывалась внутрь этой подсказки
-  templateById(templateId)[key].push({text:'', critical:false, photo:false, weight:1});
+  templateById(templateId)[key].push(blankItem(''));
+  render();
+}
+
+function blankItem(group){
+  return {text: joinItemText(group, ''), critical:false, photo:false, weight:1};
+}
+
+function templateBlock(templateId, key, blockIdx){
+  const arr = templateById(templateId)[key];
+  return { arr, block: checklistGroups(arr)[blockIdx] };
+}
+
+// Новый блок встаёт в конец и сразу с одним пустым пунктом: блок без пунктов существовать не
+// может — он собирается из них, и пустой блок исчез бы при первой же перерисовке.
+function addBlock(templateId, key){
+  const arr = templateById(templateId)[key];
+  const used = new Set(checklistGroups(arr).map(g=>g.title).filter(Boolean));
+  let name = 'Новый блок', n = 2;
+  while(used.has(name)) name = 'Новый блок ' + (n++);
+  arr.push(blankItem(name));
+  render();
+}
+
+function addItemToBlock(templateId, key, blockIdx){
+  const { arr, block } = templateBlock(templateId, key, blockIdx);
+  if(!block) return;
+  arr.splice(block.indexes[block.indexes.length-1] + 1, 0, blankItem(block.title));
+  render();
+}
+
+// Переименование блока переписывает начало текста у всех его пунктов — самой строки «блок»
+// в шаблоне нет, и хранить название больше негде.
+function renameBlock(templateId, key, blockIdx, value){
+  const { arr, block } = templateBlock(templateId, key, blockIdx);
+  if(!block) return;
+  const name = (value||'').trim();
+  block.indexes.forEach(i=>{
+    arr[i].text = joinItemText(name || null, splitItemText(arr[i].text).text);
+  });
+  // пустое имя распускает блок: пункты остаются, но становятся «вне блоков»
+  render();
+}
+
+function removeBlock(templateId, key, blockIdx){
+  const { arr, block } = templateBlock(templateId, key, blockIdx);
+  if(!block) return;
+  if(!confirm('Удалить блок «'+block.title+'» вместе с пунктами ('+block.indexes.length+')?')) return;
+  arr.splice(block.indexes[0], block.indexes.length);
+  render();
+}
+
+function moveBlock(templateId, key, blockIdx, dir){
+  const arr = templateById(templateId)[key];
+  const blocks = checklistGroups(arr);
+  const a = blocks[blockIdx], b = blocks[blockIdx + dir];
+  if(!a || !b) return;
+  const first = dir < 0 ? b : a, second = dir < 0 ? a : b;
+  const cut = arr.splice(first.indexes[0], first.indexes.length + second.indexes.length);
+  arr.splice(first.indexes[0], 0, ...cut.slice(first.indexes.length), ...cut.slice(0, first.indexes.length));
   render();
 }
 

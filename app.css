@@ -487,3 +487,52 @@
   .schedule-item-sched{font-size:11.5px;color:var(--text-muted);margin-top:3px;}
   .kiosk-demo-toggle{text-align:center;padding:20px 0 8px;}
   .kiosk-demo-toggle a{font-size:11px;color:var(--text-muted);text-decoration:underline;cursor:pointer;}
+
+/* ---------- Блоки в конструкторе чек-листа ---------- */
+/* Блок — раздел чек-листа. В шаблоне он не отдельная запись, а общее начало текста у пунктов
+   («Территория — Урны чистые»), поэтому рамка здесь чисто визуальная: она показывает, какие
+   пункты соберутся в один сворачиваемый раздел при заполнении. */
+.tpl-block{
+  border:1px solid var(--border);
+  border-left:3px solid var(--primary);
+  border-radius:8px;
+  padding:10px;
+  margin-bottom:10px;
+  background:var(--bg);
+}
+.tpl-block-loose{
+  border-left-color:var(--border);
+  background:transparent;
+}
+.tpl-block-head{
+  display:flex;
+  gap:6px;
+  align-items:center;
+  margin-bottom:8px;
+}
+.tpl-block-name{
+  flex:1;
+  min-width:120px;
+  font-weight:700;
+}
+.tpl-block-name-plain{
+  flex:1;
+  font-size:11px;
+  font-weight:700;
+  text-transform:uppercase;
+  color:var(--text-muted);
+}
+.tpl-block-count{
+  font-size:11px;
+  color:var(--text-muted);
+  background:var(--neutral-bg);
+  border-radius:10px;
+  padding:1px 7px;
+  white-space:nowrap;
+}
+
+@media (max-width:768px){
+  .tpl-block{padding:8px;}
+  .tpl-block-head{flex-wrap:wrap;}
+  .tpl-block-name{flex:1 1 100%;}
+}
