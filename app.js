@@ -1867,6 +1867,23 @@ function setAnswer(idx, val){
   render();
 }
 
+// Пока тянут ползунок — только обновляем цифру рядом, без перерисовки: иначе элемент
+// пересоздавался бы на каждый шаг и бегунок «выпрыгивал» бы из-под пальца.
+function previewScale(idx, val){
+  const el = document.getElementById('scale-val-'+idx);
+  if(el) el.textContent = val;
+  const wrap = el && el.closest('.scale-wrap');
+  if(wrap) wrap.classList.remove('scale-empty');
+}
+
+// Ползунок отпустили — фиксируем оценку. Слушаем и отпускание пальца, а не только изменение:
+// иначе оценку «0» нельзя было бы поставить касанием, ведь бегунок и так стоит в этой позиции.
+function commitScale(idx, val){
+  const v = scaleValue(val);
+  if(v===null) return;
+  setAnswer(idx, String(v));
+}
+
 // ---------- Фото к пункту чек-листа ----------
 // Снимок с телефона — это 3–5 МБ, а заполняют на объекте с мобильного интернета. Поэтому перед
 // отправкой фото уменьшается до 1600px по большей стороне и пережимается в JPEG: качество для
@@ -2146,17 +2163,37 @@ function renderChecklistForm(){
                 ${isScaleItem(it)?`<span class="tag">оценка ${SCALE_MIN}–${SCALE_MAX}</span>`:''}
               </div>
             </div>
+            ${isScaleItem(it) ? '' : `
             <div class="answer-toggle">
-              ${isScaleItem(it) ? `
-                ${SCALE_STEPS.map(n=>`<button class="toggle-btn scale ${String(a.answer)===String(n)?'active':''}" onclick="setAnswer(${idx},'${n}')">${n}</button>`).join('')}
-                <button class="toggle-btn na ${a.answer==='na'?'active':''}" title="Неактуально: на этом объекте такого нет — пункт не влияет на балл" onclick="setAnswer(${idx},'na')">Н/А</button>
-              ` : `
-                <button class="toggle-btn yes ${a.answer==='yes'?'active':''}" onclick="setAnswer(${idx},'yes')">Да</button>
-                <button class="toggle-btn no ${a.answer==='no'?'active':''}" onclick="setAnswer(${idx},'no')">Нет</button>
-                <button class="toggle-btn na ${a.answer==='na'?'active':''}" title="Неактуально: на этом объекте такого нет — пункт не влияет на балл" onclick="setAnswer(${idx},'na')">Н/А</button>
-              `}
+              <button class="toggle-btn yes ${a.answer==='yes'?'active':''}" onclick="setAnswer(${idx},'yes')">Да</button>
+              <button class="toggle-btn no ${a.answer==='no'?'active':''}" onclick="setAnswer(${idx},'no')">Нет</button>
+              <button class="toggle-btn na ${a.answer==='na'?'active':''}" title="Неактуально: на этом объекте такого нет — пункт не влияет на балл" onclick="setAnswer(${idx},'na')">Н/А</button>
             </div>
+            `}
           </div>
+          ${isScaleItem(it) ? (()=>{
+            // Ползунок, а не ряд кнопок: оценка здесь степень, и тянуть один бегунок по шкале
+            // быстрее, чем целиться в мелкие кнопки на телефоне.
+            const v = scaleValue(a.answer);
+            const isNa = a.answer==='na';
+            const pos = v===null ? 0 : v;
+            return `
+            <div class="scale-wrap ${(v===null||isNa)?'scale-empty':''}">
+              <div class="scale-head">
+                <span class="scale-value" id="scale-val-${idx}">${isNa ? 'Н/А' : (v===null ? '—' : v)}</span>
+                <button class="toggle-btn na ${isNa?'active':''}" title="Неактуально: на этом объекте такого нет — пункт не влияет на балл" onclick="setAnswer(${idx},'na')">Н/А</button>
+              </div>
+              <input type="range" class="scale-range" data-quiet-render="1"
+                min="${SCALE_MIN}" max="${SCALE_MAX}" step="1" value="${pos}"
+                ${isNa?'disabled':''}
+                oninput="previewScale(${idx}, this.value)"
+                onchange="commitScale(${idx}, this.value)"
+                onpointerup="commitScale(${idx}, this.value)"
+                onkeyup="commitScale(${idx}, this.value)">
+              <div class="scale-ticks">${SCALE_STEPS.map(n=>`<span>${n}</span>`).join('')}</div>
+              ${(v===null && !isNa) ? `<div class="scale-hint">Оценка не выставлена — передвиньте ползунок</div>` : ''}
+            </div>
+            `;})() : ''}
           ${(()=>{
             // Блок фото показывается ВСЕГДА, а не появляется после выбора ответа: иначе при каждом
             // нажатии «Да/Нет» содержимое ниже сдвигалось, и следующий пункт уезжал из-под пальца.

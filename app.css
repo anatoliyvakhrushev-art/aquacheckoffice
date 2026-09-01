@@ -232,13 +232,40 @@
   .toggle-btn.no.active{background:var(--danger-bg);border-color:var(--danger);color:var(--danger);}
   /* «Н/П» — нейтральный, не красный: это не нарушение, а отсутствие узла на объекте */
   .toggle-btn.na.active{background:var(--neutral-bg);border-color:var(--text-muted);color:var(--text-muted);font-weight:600;}
-  /* шкала 0–5: кнопок семь вместе с «Н/А», поэтому они заметно уже, чем «Да/Нет» */
-  .toggle-btn.scale{min-width:32px;padding:6px 7px;font-weight:600;}
-  .toggle-btn.scale.active{background:var(--primary);border-color:var(--primary);color:#fff;}
-  @media (max-width: 760px){
-    /* на телефоне ряд из семи кнопок должен занимать всю ширину и не переноситься по одной */
-    .answer-toggle{display:flex;gap:4px;}
-    .toggle-btn.scale{min-width:0;flex:1;padding:10px 2px;}
+  /* ---------- Шкала 0–5: ползунок ---------- */
+  /* Оценка — это степень, поэтому здесь бегунок, а не ряд кнопок: тянуть его быстрее, чем
+     целиться пальцем в мелкие кнопки, и сама шкала читается как непрерывная. */
+  .scale-wrap{margin-top:12px;}
+  .scale-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:2px;}
+  .scale-value{font-size:20px;font-weight:700;color:var(--primary);min-width:2ch;}
+  .scale-empty .scale-value{color:var(--text-muted);}
+  .scale-hint{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
+
+  .scale-range{
+    -webkit-appearance:none;appearance:none;
+    width:100%;height:26px;background:transparent;cursor:pointer;display:block;
+  }
+  .scale-range:disabled{opacity:.4;cursor:default;}
+  /* дорожка */
+  .scale-range::-webkit-slider-runnable-track{height:6px;border-radius:999px;background:var(--border);}
+  .scale-range::-moz-range-track{height:6px;border-radius:999px;background:var(--border);}
+  /* бегунок — крупный, чтобы попадать пальцем на объекте */
+  .scale-range::-webkit-slider-thumb{
+    -webkit-appearance:none;appearance:none;width:26px;height:26px;border-radius:50%;
+    background:#fff;border:2px solid var(--primary);box-shadow:0 1px 4px rgba(0,0,0,.25);
+    margin-top:-10px;
+  }
+  .scale-range::-moz-range-thumb{
+    width:26px;height:26px;border-radius:50%;background:#fff;border:2px solid var(--primary);
+    box-shadow:0 1px 4px rgba(0,0,0,.25);
+  }
+  .scale-empty .scale-range::-webkit-slider-thumb{border-color:var(--text-muted);}
+  .scale-empty .scale-range::-moz-range-thumb{border-color:var(--text-muted);}
+
+  /* деления под шкалой — по числу шагов, ровно под позициями бегунка */
+  .scale-ticks{
+    display:flex;justify-content:space-between;
+    font-size:12px;color:var(--text-muted);padding:0 11px;margin-top:-2px;
   }
   .photo-btn{
     margin-top:10px;
