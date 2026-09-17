@@ -283,6 +283,27 @@
     text-align:center;
     animation:bannerIn .16s ease-out;
   }
+  /* Ошибка не должна выглядеть как успех и не должна гаснуть раньше, чем её прочитают */
+  .banner-error{
+    background:var(--danger-bg);
+    color:var(--danger);
+    border-color:var(--danger);
+    text-align:left;
+    display:flex;
+    align-items:flex-start;
+    gap:12px;
+    font-weight:500;
+    line-height:1.45;
+  }
+  .banner-close{
+    flex:0 0 auto;
+    cursor:pointer;
+    font-weight:700;
+    opacity:.65;
+    padding:0 2px;
+    user-select:none;
+  }
+  .banner-close:hover{opacity:1;}
   @keyframes bannerIn{
     from{opacity:0; transform:translateX(-50%) translateY(-8px);}
     to{opacity:1; transform:translateX(-50%) translateY(0);}

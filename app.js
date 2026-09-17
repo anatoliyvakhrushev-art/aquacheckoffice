@@ -36,6 +36,7 @@ let state = {
   // просто чтобы не вводить одно и то же заново при повторных визитах: {name, contact}
   knownGuests: [],
   banner: null,
+  bannerKind: 'ok',   // 'ok' — зелёная плашка, сама гаснет; 'error' — красная, висит до закрытия
   // раздел «Проверки»
   inspFilterType: 'Все',
   inspFilterRegion: 'Все',
@@ -254,12 +255,50 @@ async function fetchLivePointsAndTemplates(){
 // Повторяет запрос к Supabase при сетевой/временной ошибке — 2 дополнительные попытки с паузой,
 // прежде чем показать пользователю «не удалось сохранить». Без этого один обрыв связи на мойке
 // требовал бы вручную повторять каждое действие самому, а на слабом мобильном интернете это обычная ситуация.
+// Потерянный вход выглядит как отказ в правах на таблицу: если срок действия токена истёк,
+// а обновить его не удалось, запрос уходит с анонимным ключом. Postgres тогда отвечает
+// «permission denied for table ...» (код 42501) — и на экране появлялась эта фраза, по которой
+// сотруднику невозможно догадаться, что нужно просто войти заново.
+function isSessionLostError(e){
+  if(!e) return false;
+  const code = String(e.code || '');
+  const msg = String((e.message || e) || '');
+  return code === '42501'
+      || code === 'PGRST301'
+      || /permission denied for (table|sequence|schema)/i.test(msg)
+      || /JWT expired|invalid claim|not authenticated/i.test(msg);
+}
+
+// Понятный текст вместо служебного сообщения базы.
+function explainDbError(e){
+  if(isSessionLostError(e)) return 'сеанс истёк, войдите заново.';
+  const msg = String((e && e.message) || e || 'неизвестная ошибка');
+  if(/violates row-level security/i.test(msg)) return 'недостаточно прав для этого действия.';
+  if(/duplicate key/i.test(msg)) return 'такая запись уже есть.';
+  if(/Failed to fetch|NetworkError/i.test(msg)) return 'нет связи с сервером, проверьте интернет.';
+  return msg;
+}
+
+// Возврат на экран входа при потере сеанса. Данные сети чистим: следующий вошедший на этом
+// же устройстве не должен увидеть чужие объекты и проверки до окончания загрузки.
+function handleSessionLost(){
+  if(state.mode === 'login') return;
+  clearNetworkData();
+  state.appUser = null;
+  state.mode = 'login';
+  state.authError = 'Сеанс истёк — войдите заново. Несохранённые изменения не потеряны: черновики чек-листов сохраняются отдельно.';
+  render();
+}
+
 async function sbRetry(queryFn, retries){
   retries = retries===undefined ? 2 : retries;
   let result;
   for(let attempt=0; attempt<=retries; attempt++){
     result = await queryFn();
     if(!result || !result.error) return result;
+    // повторять отказ в правах бессмысленно: он не станет успешным со второй попытки,
+    // а сотрудник лишние полторы секунды смотрит на зависшую кнопку
+    if(isSessionLostError(result.error)) return result;
     if(attempt<retries) await new Promise(r=>setTimeout(r, 500*(attempt+1)));
   }
   return result;
@@ -640,7 +679,7 @@ async function openLiveGuestChecklist(){
     openPreview('guest');
   } catch(e){
     state.guestLive = false;
-    showBanner('Не удалось загрузить реальные данные: ' + (e.message||e));
+    showDbError('Не удалось загрузить реальные данные', e);
     render();
   }
 }
@@ -1258,11 +1297,25 @@ function statusBadge(status){
   return `<span class="badge ${map[status]||'badge-neutral'}">${status}</span>`;
 }
 
-function showBanner(text){
+// kind: 'ok' (по умолчанию) или 'error'. Раньше стиль был один — зелёный, и сообщение об
+// ошибке выглядело как сообщение об успехе. Плюс ошибка не должна исчезать через 2,5 секунды:
+// её нужно успеть прочитать и понять, что делать.
+function showBanner(text, kind){
   state.banner = text;
+  state.bannerKind = kind === 'error' ? 'error' : 'ok';
   render();
-  setTimeout(()=>{ state.banner = null; renderIfBannerStale(text); }, 2500);
+  if(state.bannerKind === 'ok'){
+    setTimeout(()=>{ state.banner = null; renderIfBannerStale(text); }, 2500);
+  }
 }
+
+// Ошибка от базы: понятный текст, красная плашка, и если слетел вход — сразу на экран входа.
+function showDbError(prefix, e){
+  if(isSessionLostError(e)){ handleSessionLost(); return; }
+  showBanner(prefix + ': ' + explainDbError(e), 'error');
+}
+
+function dismissBanner(){ state.banner = null; render(); }
 function renderIfBannerStale(text){
   if(state.banner === null){ render(); }
 }
@@ -2074,7 +2127,7 @@ async function submitChecklist(){
       showBanner(`Проверка сохранена в общей базе. Итоговый балл: ${score}%. ${total-passed>0 ? (total-passed)+' нарушение(й) зафиксировано автоматически.' : 'Нарушений нет.'}`);
     } catch(e){
       state.checklistBusy = false;
-      showBanner('Не удалось сохранить в общую базу: ' + (e.message||e) + '. Попробуйте ещё раз.');
+      showDbError('Не удалось сохранить в общую базу', e);
     }
     render();
     return;
@@ -2157,7 +2210,7 @@ async function confirmFix(id){
     try{
       const { error } = await sbRetry(()=> sb.from('violations').update({status:'устранено'}).eq('id', id));
       if(error) throw error;
-    } catch(e){ showBanner('Не удалось сохранить: ' + (e.message||e)); return; }
+    } catch(e){ showDbError('Не удалось сохранить', e); return; }
   }
   v.status = 'устранено';
   v._fixing = false;
@@ -2471,7 +2524,7 @@ async function openInspectionPhoto(path){
     if(error) throw error;
     window.open(data.signedUrl, '_blank');
   } catch(e){
-    showBanner('Не удалось открыть фото: ' + ((e && e.message) || e));
+    showDbError('Не удалось открыть фото', e);
   }
 }
 
@@ -2670,7 +2723,7 @@ async function submitNewPlan(){
       state.planningShowForm = false;
       showBanner(recurrence ? 'Повторяющаяся проверка назначена ('+RECUR_FREQ_LABEL[recurrence.freq].toLowerCase()+').' : 'Проверка запланирована.');
     } catch(e){
-      showBanner('Не удалось сохранить план: ' + (e.message||e));
+      showDbError('Не удалось сохранить план', e);
     }
     return;
   }
@@ -2695,7 +2748,7 @@ async function cancelPlan(planId){
     try{
       const { error } = await sbRetry(()=> sb.from('planned_inspections').update({status:'отменена'}).eq('id', planId));
       if(error) throw error;
-    } catch(e){ showBanner('Не удалось отменить: ' + (e.message||e)); return; }
+    } catch(e){ showDbError('Не удалось отменить', e); return; }
     plan.status = 'отменена';
     render();
     return;
@@ -2712,7 +2765,7 @@ async function deletePlan(planId){
     try{
       const { error } = await sbRetry(()=> sb.from('planned_inspections').delete().eq('id', planId));
       if(error) throw error;
-    } catch(e){ showBanner('Не удалось удалить: ' + (e.message||e)); return; }
+    } catch(e){ showDbError('Не удалось удалить', e); return; }
     state.plannedInspections = state.plannedInspections.filter(p=>p.id!==planId);
     render();
     return;
@@ -2771,7 +2824,7 @@ async function completePlanInspection(planId){
         ? 'Проверка «'+t.name+'» по объекту «'+p.name+'» выполнена (балл '+score+'). Следующая проверка серии назначена на '+plan.dueDate+'.'
         : 'Проверка «'+t.name+'» по объекту «'+p.name+'» отмечена выполненной (балл '+score+') и добавлена в журнал проверок.');
     } catch(e){
-      showBanner('Не удалось сохранить выполнение: ' + (e.message||e));
+      showDbError('Не удалось сохранить выполнение', e);
     }
     return;
   }
@@ -3427,7 +3480,7 @@ async function saveTemplate(id){
     showBanner('Чек-лист «'+saved.name+'» сохранён в общей базе.');
   } catch(e){
     state.templateSaving = false;
-    showBanner('Не удалось сохранить чек-лист: ' + ((e && e.message) || e));
+    showDbError('Не удалось сохранить чек-лист', e);
   }
   render();
 }
@@ -3829,7 +3882,7 @@ async function submitNewPoint(){
       state.editingPointId = null;
       showBanner(isEdit ? 'Изменения по объекту «'+name+'» сохранены в общей базе.' : 'Объект «'+name+'» добавлен в общую базу.');
     } catch(e){
-      showBanner('Не удалось сохранить в общую базу: ' + (e.message||e));
+      showDbError('Не удалось сохранить в общую базу', e);
     }
     render();
     return;
@@ -3884,7 +3937,8 @@ async function deletePoint(pointId){
     } catch(e){
       // типичная причина отказа — у объекта уже есть проверки/нарушения/план (внешний ключ не даёт
       // удалить строку); в этом случае в реестре есть статус «недействующая» — используйте его вместо удаления
-      showBanner('Не удалось удалить объект: ' + (e.message||e) + '. Если у объекта уже есть проверки/нарушения — поставьте статус «недействующая» вместо удаления.');
+      // у объекта с историей проверок удаление не пройдёт по внешнему ключу — подсказываем выход
+      showDbError('Не удалось удалить объект. Если по нему уже проводили проверки, поставьте статус «недействующая» вместо удаления', e);
     }
     render();
     return;
@@ -4107,7 +4161,7 @@ async function submitNewUser(){
       state.editingUserId = null;
       showBanner(isEdit ? 'Изменения по пользователю «'+name+'» сохранены.' : 'Пользователь «'+name+'» добавлен в общую базу. Права доступа выставлены по умолчанию для роли — донастройте их точечно в таблице ниже.');
     } catch(e){
-      showBanner('Не удалось сохранить в общую базу: ' + (e.message||e));
+      showDbError('Не удалось сохранить в общую базу', e);
     }
     render();
     return;
@@ -4148,7 +4202,7 @@ async function deleteUser(userId){
       state.editingUserId = null;
       showBanner('Пользователь «'+u.name+'» удалён из общей базы.');
     } catch(e){
-      showBanner('Не удалось удалить пользователя: ' + (e.message||e));
+      showDbError('Не удалось удалить пользователя', e);
     }
     render();
     return;
@@ -4348,7 +4402,7 @@ async function togglePerm(userId, perm){
   render();
   if(state.live && sb){
     const { error } = await sb.from('app_users').update({perms: u.perms}).eq('id', userId);
-    if(error){ u.perms[perm] = !u.perms[perm]; showBanner('Не удалось сохранить право: ' + (error.message||error)); render(); }
+    if(error){ u.perms[perm] = !u.perms[perm]; showDbError('Не удалось сохранить право', error); render(); }
     return;
   }
   persistUsersToStorage();
@@ -4558,7 +4612,7 @@ async function submitGuest(){
         else await sb.from('known_guests').insert({ name, contact });
       } catch(e){ /* подсказка на следующий визит — не критично, если не сохранилась */ }
     } catch(e){
-      showBanner('Не удалось отправить проверку в общую базу: ' + (e.message||e));
+      showDbError('Не удалось отправить проверку в общую базу', e);
     }
     state.guestBusy = false;
     render();
@@ -4583,7 +4637,9 @@ async function submitGuest(){
 // ---------- Общие вспомогательные ----------
 
 function bannerHtml(){
-  return state.banner ? `<div class="banner">${state.banner}</div>` : '';
+  if(!state.banner) return '';
+  const err = state.bannerKind === 'error';
+  return `<div class="banner ${err?'banner-error':''}">${state.banner}${err?` <a onclick="dismissBanner()" class="banner-close" title="Закрыть">✕</a>`:''}</div>`;
 }
 
 // доп. рендер формы устранения нарушения оператором (инлайн после таблицы)
