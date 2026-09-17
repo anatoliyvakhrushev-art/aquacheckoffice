@@ -557,3 +557,19 @@
   /* палец толще курсора — ручке нужна площадь побольше */
   .tpl-drag{font-size:19px;padding:10px 9px;}
 }
+
+/* Панель подтверждения устранения — внутри карточки замечания, на месте кнопки «Устранить».
+   Раньше она добавлялась после всего экрана и появлялась в самом низу страницы. */
+.fix-panel{
+  border:1px solid var(--warning);
+  background:var(--warning-bg);
+  border-radius:10px;
+  padding:12px;
+  margin-top:4px;
+}
+.fix-panel-title{
+  font-size:13px;
+  font-weight:700;
+  color:var(--warning);
+  margin-bottom:6px;
+}

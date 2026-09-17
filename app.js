@@ -1511,8 +1511,8 @@ function renderOperator(){
     <h3 style="margin:0 0 10px 0;font-size:14px;">Чек-лист на сегодня <span class="muted" style="font-weight:400">(${point.posts||1} пост(ов) на точке)</span></h3>
     ${dailyTemplates.map(renderScheduleItem).join('')}
 
-    <h3 style="margin:20px 0 10px 0;font-size:14px;">Мои нарушения <span class="muted" style="font-weight:400">(назначены на меня)</span></h3>
-    ${myViolations.length===0 ? `<div class="empty-state">Нарушений нет — отличная работа.</div>` : myViolations.map(v=>`
+    <h3 style="margin:20px 0 10px 0;font-size:14px;">Замечания для устранения</h3>
+    ${myViolations.length===0 ? `<div class="empty-state">Замечаний нет — отличная работа.</div>` : myViolations.map(v=>`
       <div class="schedule-item">
         <div class="schedule-item-title" style="font-size:13.5px;">${v.item}</div>
         <div style="margin:8px 0;display:flex;gap:6px;flex-wrap:wrap;">
@@ -1520,9 +1520,28 @@ function renderOperator(){
           ${statusBadge(v.status)}
           <span class="badge badge-neutral">срок: ${v.deadline}</span>
         </div>
+        ${v._fixing ? renderFixPanel(v) : `
         <button class="btn btn-sm btn-secondary" style="width:100%;" onclick="fixViolation(${v.id})">Устранить</button>
+        `}
       </div>
     `).join('')}
+  `;
+}
+
+// Подтверждение устранения. Раньше эта панель добавлялась ПОСЛЕ всего экрана оператора
+// (renderOperator() + renderFixPanels()), поэтому по нажатию «Устранить» она появлялась
+// в самом низу страницы — далеко от пункта и незаметно. Теперь рисуется прямо в карточке
+// замечания, на месте кнопки.
+function renderFixPanel(v){
+  return `
+    <div class="fix-panel">
+      <div class="fix-panel-title">Подтвердить устранение</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Фото «после» пока не прикрепляется — эта возможность ещё не реализована.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn" style="flex:1;min-width:150px;" onclick="confirmFix(${v.id})">Устранено</button>
+        <button class="btn btn-secondary" onclick="fixViolation(${v.id})">Отмена</button>
+      </div>
+    </div>
   `;
 }
 
@@ -4642,21 +4661,6 @@ function bannerHtml(){
   return `<div class="banner ${err?'banner-error':''}">${state.banner}${err?` <a onclick="dismissBanner()" class="banner-close" title="Закрыть">✕</a>`:''}</div>`;
 }
 
-// доп. рендер формы устранения нарушения оператором (инлайн после таблицы)
-function renderFixPanels(){
-  const fixing = state.violations.filter(v=>v._fixing);
-  if(fixing.length===0) return '';
-  return fixing.map(v=>`
-    <div class="card" style="border-color:var(--warning)">
-      <h3>Устранение: ${v.item}</h3>
-      <div class="photo-btn attached" style="margin-bottom:12px">📷 Прикрепление фото «после» ещё не реализовано</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn" onclick="confirmFix(${v.id})">Подтвердить устранение</button>
-        <button class="btn btn-secondary" onclick="fixViolation(${v.id})">Отмена</button>
-      </div>
-    </div>
-  `).join('');
-}
 
 // ---------- Главный рендер ----------
 
@@ -4844,7 +4848,7 @@ function performRender(){
     root.innerHTML = renderRegisterScreen();
   } else if(state.mode==='preview'){
     let inner = '';
-    if(state.previewRole==='operator') inner = renderOperator() + renderFixPanels();
+    if(state.previewRole==='operator') inner = renderOperator();
     else if(state.previewRole==='guest') inner = renderGuest();
     root.innerHTML = renderPreviewShell(inner, state.previewRole);
   } else {
