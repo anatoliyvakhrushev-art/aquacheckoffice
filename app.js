@@ -1,11 +1,11 @@
-// ---------- Тестовые данные ----------
+// ---------- Состояние приложения ----------
 
 const REGIONS = ['Екатеринбург', 'Челябинск', 'Санкт-Петербург', 'Тюмень', 'Нижний Тагил'];
 
 let state = {
-  mode: 'console', // 'console' — кабинет управления (ноутбук/десктоп); 'preview' — демо-просмотр телефонных экранов
+  mode: 'console', // 'console' — кабинет управления (ноутбук); 'preview' — телефонный экран; 'login'/'register'/'password'
   section: 'analytics', // текущий раздел левого меню кабинета управления
-  previewRole: 'operator', // какая роль показана в демо-просмотре телефона
+  previewRole: 'operator', // что показано на телефоне: 'operator' или 'guest'
   editingTemplateId: null,
   adminAnalyticsType: 'Все',
   adminAnalyticsRegion: 'Все',
@@ -14,218 +14,15 @@ let state = {
   adminAnalyticsFrom: null, // произвольный период для тренда: дата "с" (null = не ограничено)
   adminAnalyticsTo: null,   // произвольный период для тренда: дата "по" (null = не ограничено)
   pointTypes: ['Конвейер', 'Робот', 'МСО'],
-  points: [
-    {id:1, name:'Конвейер на Восточной', type:'Конвейер', region:'Екатеринбург', status:'действующая', score:88},
-    {id:2, name:'Конвейер на Таганской', type:'Конвейер', region:'Екатеринбург', status:'действующая', score:71},
-    {id:3, name:'Конвейер на Бебеля-Халтурина', type:'Конвейер', region:'Екатеринбург', status:'действующая', score:94},
-    {id:4, name:'Конвейер на Артиллерийской', type:'Конвейер', region:'Челябинск', status:'действующая', score:82},
-    {id:5, name:'Конвейер на Мельникайте', type:'Конвейер', region:'Тюмень', status:'действующая', score:90},
-    {id:6, name:'Конвейер на Ефимова', type:'Конвейер', region:'Санкт-Петербург', status:'действующая', score:76},
-    {id:7, name:'Робот на Базовом', type:'Робот', region:'Екатеринбург', status:'действующая', score:85},
-    {id:8, name:'Робот в Радуге №1', type:'Робот', region:'Екатеринбург', status:'действующая', score:93},
-    {id:9, name:'Робот в Радуге №2', type:'Робот', region:'Екатеринбург', status:'действующая', score:68},
-    {id:10, name:'Робот на Героев Танкограда', type:'Робот', region:'Челябинск', status:'действующая', score:79},
-    {id:11, name:'Робот на Рощинской', type:'Робот', region:'Санкт-Петербург', status:'действующая', score:87},
-    {id:12, name:'Робот на Свердловском проспекте №2', type:'Робот', region:'Челябинск', status:'действующая', score:61},
-    {id:13, name:'Робот на Свердловском проспекте №1', type:'Робот', region:'Челябинск', status:'действующая', score:74},
-    {id:14, name:'Робот на Победы', type:'Робот', region:'Челябинск', status:'действующая', score:90},
-    {id:15, name:'МСО Ловина', type:'МСО', posts:6, region:'Челябинск', status:'действующая', score:58},
-    {id:16, name:'МСО Дарвина', type:'МСО', posts:8, region:'Челябинск', status:'действующая', score:96},
-    {id:17, name:'МСО Победы', type:'МСО', posts:5, region:'Челябинск', status:'действующая', score:83},
-    {id:18, name:'МСО Академический', type:'МСО', posts:9, region:'Екатеринбург', status:'действующая', score:91},
-    {id:19, name:'МСО БХ 2', type:'МСО', posts:4, region:'Екатеринбург', status:'действующая', score:77},
-    {id:20, name:'МСО Солнечный', type:'МСО', posts:7, region:'Екатеринбург', status:'действующая', score:81},
-    {id:21, name:'МСО Восточная', type:'МСО', posts:6, region:'Екатеринбург', status:'действующая', score:84},
-    {id:22, name:'МСО Московская', type:'МСО', posts:9, region:'Екатеринбург', status:'действующая', score:95},
-    {id:23, name:'МСО Цинковая', type:'МСО', posts:4, region:'Челябинск', status:'действующая', score:69},
-    {id:24, name:'МСО Радуга Парк', type:'МСО', posts:8, region:'Екатеринбург', status:'действующая', score:92},
-    {id:25, name:'МСО Умельцев', type:'МСО', posts:5, region:'Екатеринбург', status:'действующая', score:80},
-    {id:26, name:'МСО Фронтовых Бригад', type:'МСО', posts:6, region:'Екатеринбург', status:'действующая', score:73},
-    {id:27, name:'МСО Верхняя Пышма', type:'МСО', posts:7, region:'Екатеринбург', status:'действующая', score:88},
-    {id:28, name:'МСО Вилонова', type:'МСО', posts:9, region:'Екатеринбург', status:'действующая', score:97},
-    {id:29, name:'МСО Водительский', type:'МСО', posts:4, region:'Екатеринбург', status:'действующая', score:86},
-    {id:30, name:'МСО Лейка', type:'МСО', posts:5, region:'Нижний Тагил', status:'действующая', score:65}
-  ],
-  templates: [
-    {id:1, name:'Ежедневный чек-лист сотрудника МСО', type:'Плановая', pointType:'МСО', role:'Оператор', schedule:{freq:'daily', time:'08:00'},
-      multiPost:true,
-      // импортировано из действующего сервиса чек-листов (реальный ежедневный чек-лист сотрудника МСО).
-      // Разделы «Чистота постов» и «Контроль работоспособности оборудования» относятся к каждому посту точки —
-      // отсюда perPostItems. Остальные разделы («Обязанности сотрудников», «Здание», «Пылесос»,
-      // «Прилегающая территория», «Касса») проверяются один раз на точку — siteItems.
-      // Раздел «Сотрудник» (подпись ФИО, вес 0) в чек-лист не включён — это не критерий проверки, а подпись/аттестация.
-      perPostItems:[
-        // --- Чистота постов ---
-        {text:'Чистота пола (моем сгонами, АВД)', critical:false, photo:false},
-        {text:'Чистота стёкол и рам, стен, баннеров (убираем налёт, металлические элементы натираем силиконом)', critical:false, photo:false},
-        {text:'Колчаны под АВД и активную пену (моем АВД, убираем налёт, натираем силиконом)', critical:false, photo:false},
-        {text:'Пульты (протираем без АВД, убираем налёт, натираем силиконом; стекло только протираем, налёт не допускается)', critical:false, photo:true},
-        {text:'Кнопки пультов — целостность колпачков', critical:true, photo:false},
-        {text:'Листы и прищепки для крепления ковриков — чистота и работоспособность (если не закреплены/не работают — сообщить технику и в группу WhatsApp МСО)', critical:true, photo:false},
-        {text:'Чистота шлангов АВД, активной пены и воздушных шлангов', critical:false, photo:false},
-        {text:'Лампы освещения — чистота и работоспособность (если лампа не работает — сообщить технику и в группу WhatsApp МСО)', critical:true, photo:false},
-        {text:'Камеры — чистота и работоспособность (если камера не работает — сообщить технику и в группу WhatsApp МСО)', critical:true, photo:false},
-        {text:'Мусорные баки (моем, натираем силиконом, убираем излишки; ручки сухие на ощупь; мусор своевременно вынесен в большой бак)', critical:false, photo:false},
-        // --- Контроль работоспособности оборудования (при неисправности — сообщить технику и в группу WhatsApp) ---
-        {text:'АВД работает исправно', critical:true, photo:false},
-        {text:'Форсунки — исправность и проточка', critical:true, photo:false},
-        {text:'Пистолеты — исправность', critical:true, photo:false},
-        {text:'Купюроприёмники — исправность', critical:true, photo:false},
-        {text:'Монетоприёмники — исправность', critical:true, photo:false},
-        {text:'Безналичная оплата — работает', critical:true, photo:false},
-        {text:'Наличие воды в накопительных ёмкостях', critical:true, photo:false}
-      ],
-      siteItems:[
-        // --- Обязанности сотрудников ---
-        {text:'Работа с клиентами (объяснение работы МСО, помощь по размену денег, разрешение конфликтных ситуаций и пр.); сбор обратной связи от клиентов — что нравится, а что нет', critical:false, photo:false},
-        // --- Здание ---
-        {text:'Внешний вид: чистота фасада, двери, удалены наклейки и следы клея', critical:false, photo:false},
-        {text:'Клиентская зона всегда чистая (это ваша визитка)', critical:false, photo:false},
-        {text:'Порядок внутри: всё разобрано и на своих местах; место приёма пищи и бытовая техника — чистые', critical:false, photo:false},
-        {text:'Тех. помещение — чистый пол и стены', critical:false, photo:false},
-        {text:'Тех. помещение — чистота стойки АВД', critical:false, photo:false},
-        {text:'Тех. помещение — чистота и организация места хранения химии', critical:false, photo:true},
-        // --- Пылесос ---
-        {text:'Пылесос: корпус протёрт от грязи, наклейки целы', critical:false, photo:false},
-        {text:'Пылесос: промыты шланги, корзины и баки; пропылесосено внутри ящика (день мойки пылесоса — вторник)', critical:false, photo:false},
-        // --- Прилегающая территория ---
-        {text:'Прилегающая территория: летом выметена, трава скошена, поребрики покрашены, разметка нанесена; зимой снег вычищен', critical:false, photo:false},
-        // --- Касса ---
-        {text:'Касса в рабочем состоянии', critical:true, photo:false}
-      ]
-    },
-    {id:2, name:'Еженедельный чек-лист управляющего', type:'Плановая', pointType:'МСО', role:'Управляющий', schedule:{freq:'weekly', label:'еженедельно'}, items:[
-      {text:'Портальная установка / оборудование без протечек и поломок', critical:true, photo:true},
-      {text:'Чистота по всем постам соответствует стандарту', critical:false, photo:false},
-      {text:'Датчики уровня химии в норме', critical:true, photo:false},
-      {text:'Прилегающая территория и зона ожидания в порядке', critical:false, photo:true}
-    ]},
-    {id:3, name:'Гостевая проверка', type:'Тайный покупатель', items:[
-      {text:'Встретили и предложили услугу в течение 1 минуты', critical:false},
-      {text:'Сотрудник предложил доп.услуги (полировка, химчистка)', critical:false},
-      {text:'Итоговое качество мойки соответствует ожиданиям', critical:true, photo:true},
-      {text:'Оплата прошла без проблем', critical:false}
-    ]},
-    // импортировано из реального чек-листа «Тайный агент AQUAGIZER» для конвейерных моек.
-    // Часть исходных пунктов не переносится 1:1, т.к. наша модель поддерживает только простые
-    // критерии да/нет (+критично/фото), без взвешенных разделов, многовариантных ответов,
-    // числовых полей, шкал 1–5 и информационных экранов — см. пояснение в чате.
-    {id:4, name:'Тайный агент — Конвейерная мойка', type:'Тайный покупатель', pointType:'Конвейер', items:[
-      // --- Расположение, прилегающая территория ---
-      {text:'Мойку легко найти с дороги (понятные указатели, вывески, логичный подъезд)', critical:false, photo:false},
-      {text:'Прилегающая территория чистая, без мусора и грязи (зимой — расчищена и обработана противогололёдными средствами)', critical:false, photo:true},
-      {text:'Подъезд к мойке удобный, ничего не мешает (нет столбов/транспорта, перекрывающего дорогу)', critical:false, photo:true},
-      {text:'Освещение вокруг мойки в тёмное время суток достаточное', critical:false, photo:false},
-      {text:'Касса/терминал оплаты расположены в логичном, хорошо просматриваемом месте', critical:false, photo:false},
-      {text:'Прайс-лист виден, читаем, понятен, расположен логично', critical:false, photo:false},
-      // --- Работа сотрудников: администратор ---
-      {text:'Администратор поздоровался первым и инициировал общение', critical:false, photo:false},
-      {text:'Внешний вид администратора опрятный (одежда, обувь, причёска)', critical:false, photo:false},
-      {text:'Администратор приветлив и доброжелателен с первой фразы диалога', critical:false, photo:false},
-      {text:'Администратор вежлив и дружелюбен, без фамильярности и грубости, отвечает по делу', critical:false, photo:false},
-      {text:'Администратор компетентен: объяснил разницу программ мойки и порекомендовал доп.услугу', critical:true, photo:false},
-      {text:'Администратор сам уточнил участие в программе лояльности, рассказал об условиях и предложил списать бонусы', critical:false, photo:false},
-      {text:'Администратор уточнил знакомство с правилами конвейерной мойки и рассказал основные правила', critical:false, photo:false},
-      // --- Работа сотрудников: мойщики ---
-      {text:'Мойщики встретили автомобиль в разумный срок после оплаты (не более 5 минут ожидания)', critical:false, photo:false},
-      {text:'Внешний вид мойщика опрятный, без посторонних запахов', critical:false, photo:false},
-      {text:'Мойщик одет по корпоративной форме AQUAGIZER (куртка/штаны с логотипом, в чистом состоянии)', critical:false, photo:true},
-      {text:'Мойщики чётко скоординировали въезд на конвейер (сказали, когда включить нейтральную передачу), не повышали голос', critical:true, photo:false},
-      // --- Мойка ---
-      {text:'Въезд на мойку без ям и наледи', critical:true, photo:false},
-      {text:'Пена на арке пенной лавы наносится равномерно, в достаточном количестве', critical:false, photo:true},
-      {text:'Проекция фирменного осьминога на стекле чёткая и яркая', critical:false, photo:true},
-      {text:'Кузов автомобиля отмыт полностью — нет непромытых участков и остатков пены', critical:true, photo:true},
-      {text:'Автомобиль качественно высушен — без потёков и капель', critical:true, photo:true},
-      {text:'В процессе мойки нет постороннего запаха (канализация/сырость), ощущения комфортные', critical:false, photo:false},
-      {text:'Выезд с мойки логичный и понятный, места достаточно', critical:false, photo:false},
-      {text:'Светофор на выезде исправен, корректно показывает обратный отсчёт и разрешающую стрелку', critical:true, photo:false},
-      // --- Фотофиксация ---
-      {text:'Приложено фото автомобиля ДО мойки', critical:false, photo:true},
-      {text:'Приложено фото автомобиля ПОСЛЕ мойки (на территории AQUAGIZER, после выезда из бокса)', critical:false, photo:true},
-      {text:'Приложено фото кассового чека', critical:false, photo:true}
-    ]}
-  ],
-  inspections: [
-    {id:1, pointId:15, templateId:1, kind:'Плановая', date:'2026-07-06', score:58, inspector:'Оператор Иванов'},
-    {id:2, pointId:12, templateId:2, kind:'Плановая', date:'2026-07-05', score:60, inspector:'Управляющий Смирнова'},
-    {id:3, pointId:3, templateId:1, kind:'Плановая', date:'2026-07-04', score:100, inspector:'Оператор Петров'},
-    {id:4, pointId:6, templateId:3, kind:'Тайный покупатель', date:'2026-07-03', score:90, inspector:'Гость #4471'},
-    {id:5, pointId:9, templateId:1, kind:'Плановая', date:'2026-07-02', score:85, inspector:'Оператор Козлова'},
-    // доп. история для демонстрации тренда по последним проверкам (раздел аналитики)
-    {id:6, pointId:3, templateId:1, kind:'Плановая', date:'2026-06-17', score:72, inspector:'Оператор Петров'},
-    {id:7, pointId:3, templateId:1, kind:'Плановая', date:'2026-06-24', score:78, inspector:'Оператор Петров'},
-    {id:8, pointId:3, templateId:1, kind:'Плановая', date:'2026-07-01', score:85, inspector:'Оператор Петров'},
-    {id:9, pointId:6, templateId:1, kind:'Плановая', date:'2026-06-16', score:92, inspector:'Оператор Белова'},
-    {id:10, pointId:6, templateId:1, kind:'Плановая', date:'2026-06-23', score:88, inspector:'Оператор Белова'},
-    {id:11, pointId:6, templateId:1, kind:'Плановая', date:'2026-06-30', score:80, inspector:'Оператор Белова'},
-    {id:12, pointId:6, templateId:1, kind:'Плановая', date:'2026-07-05', score:76, inspector:'Оператор Белова'},
-    {id:13, pointId:9, templateId:1, kind:'Плановая', date:'2026-06-15', score:70, inspector:'Оператор Козлова'},
-    {id:14, pointId:9, templateId:1, kind:'Плановая', date:'2026-06-22', score:78, inspector:'Оператор Козлова'},
-    {id:15, pointId:9, templateId:1, kind:'Плановая', date:'2026-06-29', score:82, inspector:'Оператор Козлова'},
-    {id:16, pointId:14, templateId:1, kind:'Плановая', date:'2026-06-14', score:70, inspector:'Оператор Титов'},
-    {id:17, pointId:14, templateId:1, kind:'Плановая', date:'2026-06-21', score:78, inspector:'Оператор Титов'},
-    {id:18, pointId:14, templateId:1, kind:'Плановая', date:'2026-06-28', score:85, inspector:'Оператор Титов'},
-    {id:19, pointId:14, templateId:1, kind:'Плановая', date:'2026-07-05', score:90, inspector:'Оператор Титов'},
-    {id:20, pointId:15, templateId:1, kind:'Плановая', date:'2026-06-15', score:80, inspector:'Оператор Иванов'},
-    {id:21, pointId:15, templateId:1, kind:'Плановая', date:'2026-06-22', score:70, inspector:'Оператор Иванов'},
-    {id:22, pointId:15, templateId:1, kind:'Плановая', date:'2026-06-29', score:63, inspector:'Оператор Иванов'},
-    {id:23, pointId:28, templateId:1, kind:'Плановая', date:'2026-06-16', score:93, inspector:'Оператор Волкова'},
-    {id:24, pointId:28, templateId:1, kind:'Плановая', date:'2026-06-23', score:95, inspector:'Оператор Волкова'},
-    {id:25, pointId:28, templateId:1, kind:'Плановая', date:'2026-06-30', score:96, inspector:'Оператор Волкова'},
-    {id:26, pointId:28, templateId:1, kind:'Плановая', date:'2026-07-06', score:97, inspector:'Оператор Волкова'}
-  ],
-  violations: [
-    {id:1, pointId:15, item:'Касса и терминал оплаты работают', critical:true, status:'просрочено', assignee:'Оператор Иванов', deadline:'2026-07-05'},
-    {id:2, pointId:12, item:'Датчики уровня химии в норме', critical:true, status:'в работе', assignee:'Оператор Смирнова', deadline:'2026-07-09'},
-    {id:3, pointId:9, item:'Зона ожидания клиентов чистая', critical:false, status:'новое', assignee:'—', deadline:'—'},
-    {id:4, pointId:7, item:'Пылесосы исправны', critical:false, status:'устранено', assignee:'Оператор Петров', deadline:'2026-07-03'}
-  ],
-  users: [
-    {id:1, name:'Иванов И.И.', role:'Оператор', point:'МСО Ловина', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    // у управляющих — портфель точек (pointIds), а не одна точка: у каждого могут быть объекты разных типов
-    {id:2, name:'Соколова А.П.', role:'Управляющий', pointIds:[15,16,17,23,10,4], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    // у терр. директора — подчинённые управляющие (directorManagerIds), а не город: его зона ответственности = объекты его управляющих
-    {id:3, name:'Мартынов Д.С.', role:'Терр. директор', directorManagerIds:[2,5], perms:{createChecklists:true, assignInspections:true, deleteInspections:true, viewInspections:true, addPoints:true, addUsers:true}},
-    {id:5, name:'Крылова О.И.', role:'Управляющий', pointIds:[12,13,14], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:6, name:'Гаврилов К.С.', role:'Управляющий', pointIds:[1,2,3,7,8], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:7, name:'Егорова Н.В.', role:'Управляющий', pointIds:[9,18,19,20,21], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:8, name:'Панов Р.А.', role:'Управляющий', pointIds:[22,24,25,26], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:9, name:'Дмитриева Е.С.', role:'Управляющий', pointIds:[5,6,11,27,28,29,30], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    // --- импорт реального списка пользователей из стороннего сервиса (портфели управляющих/директоров ниже намеренно пустые — донастраиваются вручную) ---
-    {id:10, name:'Байдина Дарья', email:'dashu-93@mail.ru', role:'Управляющий', pointIds:[], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:11, name:'МСО Умельцев', email:'ymelcev10@gmail.com', role:'Оператор', point:'МСО Умельцев', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:12, name:'Стафеев Сергей Николаевич', email:'stafeevsn@gmail.com', role:'Управляющий', pointIds:[], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:13, name:'Заболотских Владимир Юрьевич', email:'Wladimirix@mail.ru', role:'Управляющий', pointIds:[], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:14, name:'Робот на базовом', email:'artem.konovalov2019@bk.ru', role:'Оператор', point:'Робот на Базовом', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:15, name:'Вилонова МСО', email:'Lena.trenixina@mail.ru', role:'Оператор', point:'МСО Вилонова', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:16, name:'Трубин Данил', email:'marketing@aquagizer.ru', role:'Маркетолог', perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:17, name:'Костецкий Алексей', email:'mr.norton1987@mail.ru', role:'Управляющий', pointIds:[], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:18, name:'МСО Фронтовых Бригад', email:'aquagizerv5v@gmail.com', role:'Оператор', point:'МСО Фронтовых Бригад', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:19, name:'Чазов Артем Всеволодович', email:'Chazov21@yandex.ru', role:'Управляющий', pointIds:[], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:20, name:'МСО Пышма', email:'verkhnyaya.pyshma@mail.ru', role:'Оператор', point:'МСО Верхняя Пышма', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:21, name:'Робот на Рощинской', email:'kr@mail.ru', role:'Оператор', point:'Робот на Рощинской', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:22, name:'Кролевец Вячеслав', email:'krolevec.v@mail.ru', role:'Управляющий', pointIds:[], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:23, name:'Махнёв Юрий', email:'U_mahnev@mail.ru', role:'Управляющий', pointIds:[], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:24, name:'МСО Радуга', email:'Msoradugapark@gmail.com', role:'Оператор', point:'МСО Радуга Парк', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:25, name:'МСО Лейка', email:'trachukfm88@mail.ru', role:'Оператор', point:'МСО Лейка', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:26, name:'МСО Водительский проезд', email:'aquagizer2021@gmail.com', role:'Оператор', point:'МСО Водительский', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:27, name:'Патрушев Сергей', email:'ser-patrus@yandex.ru', role:'Управляющий', pointIds:[], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:28, name:'МСО Московская', email:'msomoskovskaa@gmail.com', role:'Оператор', point:'МСО Московская', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:29, name:'Бебеля', email:'aquagizer@outlook.com', role:'Оператор', point:'МСО БХ 2', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:30, name:'Подгорбунских Алёна Викторовна', email:'Mrs.podgorbunskikh@mail.ru', role:'Управляющий', pointIds:[], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:31, name:'Вахрушев Анатолий', email:'anatoliy.vakhrushev@gmail.com', role:'Терр. директор', directorManagerIds:[], perms:{createChecklists:true, assignInspections:true, deleteInspections:true, viewInspections:true, addPoints:true, addUsers:true}},
-    {id:32, name:'МСО Академическая', email:'Msoacadem@gmail.com', role:'Оператор', point:'МСО Академический', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:33, name:'МСО Солнечный', email:'Msosolnecnyi@gmail.com', role:'Оператор', point:'МСО Солнечный', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:34, name:'МСО Восточная', email:'vostochnaya5b@gmail.com', role:'Оператор', point:'МСО Восточная', perms:{createChecklists:false, assignInspections:false, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:35, name:'Тренихина Елена Олеговна', email:'Trenykhinalala@gmail.com', role:'Терр. директор', directorManagerIds:[], perms:{createChecklists:true, assignInspections:true, deleteInspections:true, viewInspections:true, addPoints:true, addUsers:true}},
-    {id:36, name:'Чернышов Иван Владимирович', email:'chernyshov_ivan90@mail.ru', role:'Управляющий', pointIds:[], perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}},
-    {id:37, name:'tagirovna@pskeverest.ru', email:'tagirovna@pskeverest.ru', role:'Аудитор', perms:{createChecklists:false, assignInspections:true, deleteInspections:false, viewInspections:true, addPoints:false, addUsers:false}}
-  ],
-  // текущий "рабочий контекст" для демо конкретных ролей
-  myPointId: 15,
+  // Данные сети. Заполняются из Supabase после входа (см. loadLiveData), до входа пусты.
+  points: [],           // {id, name, type, posts, region, status}
+  templates: [],        // шаблоны чек-листов, см. mapTemplateFromDb
+  inspections: [],      // проведённые проверки
+  violations: [],       // зафиксированные нарушения
+  users: [],            // сотрудники и их права, см. mapAppUserFromDb
+  // текущий рабочий контекст сотрудника
+  myPointId: null,
   operatorTasksDone: [], // {templateId, doneAt}
-  demoNow: '09:15', // демо-имитация времени на рабочем телефоне (в реальном продукте — системные часы устройства)
   guestSubmitted: false,
   guestAnswers: {},
   // гостевая проверка (тайный покупатель): шаг 'intake' (выбор объекта + представиться) → 'checklist'
@@ -237,9 +34,7 @@ let state = {
   guestContact: '',
   // подсказки по ранее указанным именам/контактам тайных покупателей — НЕ пользователи системы,
   // просто чтобы не вводить одно и то же заново при повторных визитах: {name, contact}
-  knownGuests: [
-    {name:'Гость #4471', contact:''}
-  ],
+  knownGuests: [],
   banner: null,
   // раздел «Проверки»
   inspFilterType: 'Все',
@@ -328,54 +123,30 @@ let state = {
   // recurrence: null (одноразовая) | {freq:'daily'|'weekly'|'monthly', slaDays:N}
   // assignedAt — дата назначения ТЕКУЩЕЙ проверки цикла; dueDate = assignedAt + slaDays (для повторяющихся)
   // history — журнал выполненных проверок серии: [{date, score, inspectionId}]
-  plannedInspections: [
-    {id:1, pointId:24, templateId:3, assigneeId:16, note:'Плановая тайная проверка нового объекта', status:'запланирована', recurrence:null, assignedAt:'2026-07-09', dueDate:'2026-07-15', history:[]},
-    {id:2, pointId:15, templateId:1, assigneeId:1, note:'Внеплановая проверка по жалобе клиента', status:'запланирована', recurrence:null, assignedAt:'2026-07-06', dueDate:'2026-07-08', history:[]},
-    {id:3, pointId:3, templateId:3, assigneeId:37, note:'Ежемесячный аудит по сети (Аудитор, без подчинённых)', status:'запланирована', recurrence:{freq:'monthly', slaDays:7}, assignedAt:'2026-07-13', dueDate:'2026-07-20', history:[]},
-    {id:4, pointId:6, templateId:3, assigneeId:16, note:'', status:'выполнена', recurrence:null, assignedAt:'2026-07-01', dueDate:'2026-07-03', resultInspectionId:4, history:[{date:'2026-07-03', score:90, inspectionId:4}]},
-    {id:5, pointId:20, templateId:1, assigneeId:33, note:'Дополнительный контроль ежедневного чек-листа МСО', status:'запланирована', recurrence:{freq:'daily', slaDays:1}, assignedAt:'2026-07-09', dueDate:'2026-07-10', history:[]},
-    {id:6, pointId:15, templateId:2, assigneeId:2, note:'Регулярный еженедельный контроль управляющего', status:'запланирована', recurrence:{freq:'weekly', slaDays:3}, assignedAt:'2026-07-06', dueDate:'2026-07-09', history:[]}
-  ]
+  plannedInspections: []
 };
 
 // ==================== Supabase (реальный бэкенд для рабочего пилота) ====================
-// «Рабочий вход» (логин/пароль) и «Гостевая проверка — реальная» пишут в этот проект.
-// Обычный демо-просмотр (кнопки в кабинете управления) работает полностью локально,
-// в Supabase ничего не пишет и не читает.
+// Вход по логину/паролю и гостевая проверка пишут в этот проект.
 const SUPABASE_URL = 'https://koctgpwqcmytungdgfdu.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtvY3RncHdxY215dHVuZ2RnZmR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQxODgwMTYsImV4cCI6MjA5OTc2NDAxNn0.Lb02a3T2YXrKmoaWQ4vyAN5mgGrllCKaeZikmkeiRSk';
 const sb = (window.supabase) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
-
-// снимок демо-данных (объекты/шаблоны) — чтобы вернуться к демо-показу после того, как
-// рабочий вход или реальная гостевая проверка временно подменят state.points/state.templates
-// настоящими данными из Supabase.
-const DEMO_SEED_POINTS = JSON.parse(JSON.stringify(state.points));
-const DEMO_SEED_TEMPLATES = JSON.parse(JSON.stringify(state.templates));
-
-function restoreDemoData(){
-  state.points = JSON.parse(JSON.stringify(DEMO_SEED_POINTS));
-  state.templates = JSON.parse(JSON.stringify(DEMO_SEED_TEMPLATES));
-  // users/violations/inspections/plannedInspections подменяются реальными данными на время
-  // рабочего входа (см. finishLiveLogin) — возвращаем демо-снимок, иначе после выхода из
-  // живого сеанса демо-показ остался бы засорён настоящими данными пилота.
-  state.users = JSON.parse(JSON.stringify(DEMO_SEED_USERS));
-  state.violations = JSON.parse(JSON.stringify(DEMO_SEED_VIOLATIONS));
-  state.inspections = JSON.parse(JSON.stringify(DEMO_SEED_INSPECTIONS));
-  state.plannedInspections = JSON.parse(JSON.stringify(DEMO_SEED_PLANNED_INSPECTIONS));
+// После выхода из учётной записи данные сети остаются в памяти страницы до перезагрузки.
+// Их нужно вычистить явно: иначе следующий сотрудник, войдя на том же устройстве, до
+// окончания загрузки увидел бы объекты и проверки предыдущего — включая те, на которые
+// у него нет прав.
+function clearNetworkData(){
+  state.points = [];
+  state.templates = [];
+  state.users = [];
+  state.violations = [];
+  state.inspections = [];
+  state.plannedInspections = [];
   state.live = false;
   state.guestLive = false;
 }
-
-// ---- разделение демо-показа и рабочего пилота по разным HTML-файлам ----
-// index.html (data-entry="pilot") задаёт ENTRY='pilot' — грузится сразу на экран входа, без
-// демо-кабинета и без ссылок на него; demo.html (data-entry="demo") задаёт ENTRY='demo' — не
-// подключает Supabase SDK вовсе (см. отсутствие <script src=".../supabase-js"> в demo.html),
-// поэтому sb ниже гарантированно null и живые sb.from(...)-ветки физически не могут сработать,
-// а не просто скрыты в интерфейсе.
-const ENTRY = document.documentElement.dataset.entry || 'demo';
-const PILOT_ONLY = ENTRY === 'pilot';
-const DEMO_ONLY = ENTRY === 'demo';
-if(PILOT_ONLY) state.mode = 'login';
+// Единственный вход — index.html: приложение открывается сразу на экране входа.
+state.mode = 'login';
 
 // ---------- Запоминание входа ----------
 // Supabase хранит сессию в браузере сам, но приложение её не спрашивало при загрузке — поэтому
@@ -404,7 +175,7 @@ function forgetSession(){
 }
 
 // ---- состояние рабочего входа ----
-state.live = false;        // true = сейчас показан реальный сеанс сотрудника (не демо)
+state.live = false;        // true = сотрудник вошёл и данные сети загружены
 state.guestLive = false;   // true = гостевая проверка сейчас идёт по реальным данным
 state.authLogin = '';
 state.authPassword = '';
@@ -452,7 +223,7 @@ function mapViolationFromDb(row){
   return { id: row.id, pointId: row.point_id, item: row.item, critical: row.critical, status: row.status, assignee: row.assignee || '—', deadline: row.deadline || '—' };
 }
 // форма совпадает с тем, что уже читают startEditUser/renderAdminUsers/комбобоксы
-// (см. index.html: state.users в демо-seed) — остальной код о живых данных не знает.
+// — остальной код о происхождении данных не знает.
 function mapAppUserFromDb(row){
   return {
     id: row.id, name: row.name, email: row.email || undefined, role: row.role,
@@ -499,21 +270,11 @@ function humanizeAuthError(msg){
   return msg;
 }
 
-function enterDemo(role){
-  restoreDemoData();
-  openPreview(role);
-}
-
 function goLiveLogin(){
   state.mode = 'login';
   state.authLogin = '';
   state.authPassword = '';
   state.authError = '';
-  render();
-}
-
-function backToConsoleFromLogin(){
-  state.mode = PILOT_ONLY ? 'login' : 'console'; // в пилоте нет демо-кабинета, куда возвращаться
   render();
 }
 
@@ -572,7 +333,7 @@ async function finishLiveLogin(uid){
     state.mode = 'preview';
   } else {
     // Управляющий/Терр. директор/Маркетолог/Аудитор — офисные роли: полноценный кабинет
-    // управления (тот же экран, что в демо-показе), только с настоящими данными сети.
+    // управления с данными сети.
     state.section = 'analytics';
     state.mode = 'console';
   }
@@ -776,7 +537,6 @@ function renderRegisterScreen(){
       <button class="btn" style="width:100%;margin-top:16px;" ${(state.regBusy||!selected)?'disabled':''} onclick="doRegister()">${state.regBusy?'Регистрируем…':'Зарегистрироваться и войти'}</button>
       <div style="text-align:center;margin-top:14px;">
         <a onclick="goLiveLogin()" style="font-size:12px;">Уже есть логин? Войти</a><br>
-        ${PILOT_ONLY ? `` : `<a onclick="backToConsoleFromLogin()" style="font-size:12px;">← Назад к демо-кабинету</a>`}
       </div>
     </div>
   `;
@@ -860,9 +620,9 @@ function renderPasswordScreen(){
 async function doLogout(){
   if(sb) { try{ await sb.auth.signOut(); }catch(e){} }
   forgetSession();   // вышли осознанно — следующий заход снова через логин
-  restoreDemoData();
+  clearNetworkData();
   state.appUser = null;
-  state.mode = PILOT_ONLY ? 'login' : 'console'; // в пилоте после выхода — обратно на вход, не в демо-кабинет
+  state.mode = 'login';
   render();
 }
 
@@ -901,9 +661,7 @@ function renderLoginScreen(){
       <button class="btn" style="width:100%;" ${state.authBusy?'disabled':''} onclick="doLogin()">${state.authBusy?'Входим…':'Войти'}</button>
       <div style="text-align:center;margin-top:14px;">
         <a onclick="goRegister()" style="font-size:12px;">Ещё не зарегистрированы? Регистрация</a><br>
-        ${PILOT_ONLY
-          ? `<a onclick="openLiveGuestChecklist()" style="font-size:12px;">Я тайный покупатель — пройти проверку</a>`
-          : `<a onclick="backToConsoleFromLogin()" style="font-size:12px;">← Назад к демо-кабинету</a>`}
+        <a onclick="openLiveGuestChecklist()" style="font-size:12px;">Я тайный покупатель — пройти проверку</a>
       </div>
     </div>
   `;
@@ -1011,7 +769,6 @@ const CHECKLIST_DRAFTS_STORAGE_KEY = 'checkoffice_checklist_drafts_v1';
 // Черновик привязан к сотруднику: рабочий телефон точки один, а заходить под ним могут разные
 // люди — чужой незаконченный чек-лист показывать нельзя.
 function currentDraftUserKey(){
-  if(!state.live) return 'demo';
   return (state.appUser && (state.appUser.auth_user_id || state.appUser.id)) ? String(state.appUser.auth_user_id || state.appUser.id) : 'unknown';
 }
 
@@ -1159,14 +916,6 @@ function savedDraftProgress(templateId, pointId, planId){
   return { answered, total: d.answers.length, savedAt: d.savedAt };
 }
 
-// снимок демо-данных пользователей/нарушений/проверок/планирования — СНИМАЕТСЯ ПОСЛЕ
-// применения localStorage-оверлея выше (сохраняет ручные демо-правки), но ДО того, как
-// рабочий вход (finishLiveLogin) когда-либо подменит их реальными данными. См. restoreDemoData().
-const DEMO_SEED_USERS = JSON.parse(JSON.stringify(state.users));
-const DEMO_SEED_VIOLATIONS = JSON.parse(JSON.stringify(state.violations));
-const DEMO_SEED_INSPECTIONS = JSON.parse(JSON.stringify(state.inspections));
-const DEMO_SEED_PLANNED_INSPECTIONS = JSON.parse(JSON.stringify(state.plannedInspections));
-
 function matchesSearch(text, search){
   if(!search) return true;
   return (text||'').toLowerCase().includes(search.trim().toLowerCase());
@@ -1287,13 +1036,9 @@ function renderCombo(cfg){
   `;
 }
 
-const ANALYTICS_TODAY = '2026-07-09'; // демо-«сегодня» для расчёта пресетов периода (7/30 дней)
 
-// В живом режиме экраны показывают тем же кодом реальным сотрудникам — поэтому всё, что должно
-// считаться "от сегодня" (рейтинг, пресеты периода, просрочка плана), не может брать зафиксированную
-// демо-дату выше: иначе для настоящего пилота эти расчёты навсегда остались бы привязаны к 2026-07-09,
-// даже когда календарь давно ушёл вперёд.
-function todayStr(){ return state.live ? new Date().toISOString().slice(0,10) : ANALYTICS_TODAY; }
+// Всё, что считается «от сегодня» (рейтинг, пресеты периода, просрочка плана), берёт дату отсюда.
+function todayStr(){ return new Date().toISOString().slice(0,10); }
 
 function addDays(dateStr, days){
   const [y, m, day] = dateStr.split('-').map(Number);
@@ -1303,49 +1048,8 @@ function addDays(dateStr, days){
 
 function seededRand(seed){ const x = Math.sin(seed)*10000; return x - Math.floor(x); }
 
-// Автогенерация истории проверок для рейтинга/тренда там, где реальных данных мало —
-// чтобы рейтинг и «Сравнение по последним проверкам» были информативны по всем точкам сети, а не только по демо-примерам.
-// Важно: официальный рейтинг объекта считается ТОЛЬКО по проверкам управляющего/тер.директора —
-// самооценка оператора (ежедневный чек-лист) в расчёт не идёт, поэтому и история подставляется
-// на уровне управляющего (templateId:2, еженедельный чек-лист) — это же соответствует его реальной частоте.
-(function seedTrendHistory(){
-  const HIST_DATES = ['2026-06-15', '2026-06-22', '2026-06-29', '2026-07-06'];
-  state.points.forEach(p=>{
-    const existing = state.inspections.filter(i=>{
-      if(i.pointId!==p.id || i.kind!=='Плановая') return false;
-      const t = templateById(i.templateId);
-      return t && t.role!=='Оператор';
-    });
-    if(existing.length>=2) return; // у точки уже есть содержательная история уровня управляющего/директора
-
-    const scores = new Array(HIST_DATES.length);
-    scores[HIST_DATES.length-1] = p.score;
-    for(let i=HIST_DATES.length-2;i>=0;i--){
-      const delta = Math.round((seededRand(p.id*31+i*7)-0.5)*14); // ±7
-      scores[i] = Math.max(35, Math.min(99, scores[i+1] - delta));
-    }
-    HIST_DATES.forEach((d,idx)=>{
-      const newId = state.inspections.reduce((m,i)=>Math.max(m,i.id),0)+1;
-      state.inspections.push({id:newId, pointId:p.id, templateId:2, kind:'Плановая', date:d, score:scores[idx], inspector:'Управляющий (история, демо)'});
-    });
-  });
-})();
-
-// Чек-лист заполняется с рабочего телефона точки, а не конкретным человеком — поэтому
-// «проверяющий» в записях оператора — это роль + точка («Оператор МСО Ловина»), а не фамилия сотрудника.
-(function normalizeOperatorInspectorLabels(){
-  state.inspections.forEach(insp=>{
-    if(insp.kind !== 'Плановая') return; // гостевые проверки не трогаем
-    const t = templateById(insp.templateId);
-    if(!t || t.role !== 'Оператор') return;
-    const p = pointById(insp.pointId);
-    if(!p) return;
-    insp.inspector = 'Оператор ' + p.name;
-  });
-})();
-
 // Собирает псевдослучайный, но детерминированный набор ответов по пунктам чек-листа,
-// согласованный с итоговым баллом проверки — чтобы у демо-проверок был открываемый состав чек-листа.
+// согласованный с итоговым баллом проверки — чтобы у старых проверок был открываемый состав чек-листа.
 function synthesizeInspectionItems(template, point, score, seed){
   const items = buildChecklistItems(template, point) || [];
   const total = items.length;
@@ -1357,20 +1061,6 @@ function synthesizeInspectionItems(template, point, score, seed){
   return items.map((it,idx)=>({ text:it.text, critical:it.critical, photo:it.photo, answer: failSet.has(idx) ? 'no' : 'yes' }));
 }
 
-// Дозаполняет детальный состав чек-листа у проверок, где он ещё не сохранён
-// (исторические/демо-записи — у «живых» проверок, отправленных через форму, состав уже есть).
-(function attachSyntheticChecklistItems(){
-  state.inspections.forEach(insp=>{
-    if(insp.items) return;
-    const t = templateById(insp.templateId);
-    const p = pointById(insp.pointId);
-    if(!t || !p) return;
-    insp.items = synthesizeInspectionItems(t, p, insp.score, insp.id*47+11);
-  });
-})();
-
-const DEMO_TIME_OPTIONS = ['08:30', '09:15', '10:30', '12:00', '20:45', '21:15', '22:30'];
-
 function timeToMinutes(t){ const [h,m] = t.split(':').map(Number); return h*60+m; }
 function minutesToTime(mins){
   mins = ((mins % 1440) + 1440) % 1440;
@@ -1378,14 +1068,11 @@ function minutesToTime(mins){
   return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
 }
 function doneRecord(templateId){ return state.operatorTasksDone.find(d=>d.templateId===templateId); }
-function setDemoNow(val){ state.demoNow = val; render(); }
 
-// В демо время «на телефоне» имитируется вручную (state.demoNow); в живом режиме статус
-// due/overdue должен идти от настоящих часов устройства, а не от застывшего демо-значения —
-// иначе у реального оператора чек-лист всегда выглядел бы просроченным или недоступным.
+// Статус due/overdue считается от настоящих часов устройства.
 function currentClockMinutes(){
-  if(state.live){ const d = new Date(); return d.getHours()*60 + d.getMinutes(); }
-  return timeToMinutes(state.demoNow);
+  const d = new Date();
+  return d.getHours()*60 + d.getMinutes();
 }
 
 function computeScheduleStatus(template){
@@ -1619,7 +1306,6 @@ const SECTION_PERM = {
 function canSeeSection(sectionId){
   const need = SECTION_PERM[sectionId];
   if(!need) return true;                 // раздел без ограничений — виден всем вошедшим
-  if(!state.live) return true;           // демо-показ демонстрирует кабинет целиком, без роли
   return !!(state.appUser && state.appUser.perms && state.appUser.perms[need]);
 }
 
@@ -1627,7 +1313,6 @@ function canSeeSection(sectionId){
 // ему, а не распределяет работу), у остальных ролей включено — см. DEFAULT_PERMS_BY_ROLE.
 // Видеть раздел «Планирование» и проходить назначенное это право не запрещает.
 function canAssignInspections(){
-  if(!state.live) return true;           // демо-показ
   return !!(state.appUser && state.appUser.perms && state.appUser.perms.assignInspections);
 }
 
@@ -1635,9 +1320,9 @@ function canAssignInspections(){
 // нарушения). Аналитика их не использует: рейтинги и тренды считаются по всей сети, чтобы
 // управляющий видел свои точки в сравнении с остальными (см. supabase-патч, открывающий чтение
 // points/inspections всем сотрудникам). Здесь же — ограничение того, что показываем в деталях.
-// Возвращает null, если ограничивать не нужно (демо-показ или сотрудник, видящий всю сеть).
+// Возвращает null, если ограничивать не нужно (сотрудник видит всю сеть).
 function myScopePointIds(){
-  if(!state.live || !state.appUser) return null;      // демо-показ — без ограничений
+  if(!state.appUser) return null;                     // до входа ограничивать нечего: данных нет
   const u = state.appUser;
   if(u.perms && u.perms.addUsers) return null;         // администратор видит всё
   if(u.role==='Маркетолог' || u.role==='Аудитор') return null;
@@ -1701,7 +1386,7 @@ function openPreview(role){
   state.mode = 'preview';
   state.previewRole = role;
   if(role==='guest'){
-    // каждый заход в демо гостя начинается заново с шага «выбор объекта + представиться»
+    // каждая гостевая проверка начинается заново с шага «выбор объекта + представиться»
     state.guestSubmitted = false;
     state.guestStep = 'intake';
     state.guestPointId = null;
@@ -1715,8 +1400,8 @@ function openPreview(role){
 }
 
 function exitPreview(){
-  restoreDemoData();
-  state.mode = PILOT_ONLY ? 'login' : 'console'; // тот же случай для выхода из гостевой (реальной) проверки в пилоте
+  clearNetworkData();
+  state.mode = 'login';
   render();
 }
 
@@ -1767,16 +1452,6 @@ function renderOperator(){
   };
 
   return `
-    ${state.live ? '' : `
-    <div class="demo-clock-card">
-      <div class="demo-label">Демо: не часть продукта</div>
-      <label style="font-size:12.5px;">Симулировать время на телефоне: </label>
-      <select onchange="setDemoNow(this.value)" style="margin-left:4px;">
-        ${DEMO_TIME_OPTIONS.map(t=>`<option value="${t}" ${state.demoNow===t?'selected':''}>${t}</option>`).join('')}
-      </select>
-      <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px;">В реальном продукте чек-лист сам появляется по расписанию — эту кнопку добавили только для теста на телефоне.</div>
-    </div>
-    `}
 
     ${bannerHtml()}
 
@@ -2425,7 +2100,7 @@ async function submitChecklist(){
 
   if(planId) closePlanLocallyAfterChecklist(planId, localInspection, score);
 
-  state.operatorTasksDone.push({templateId:t.id, doneAt: state.demoNow});
+  state.operatorTasksDone.push({templateId:t.id, doneAt: minutesToTime(currentClockMinutes())});
   clearSavedDraft(t.id, pointId, planId);
   checklistDraft = null;
   showBanner(`Проверка отправлена. Итоговый балл: ${score}%. ${total-passed>0 ? (total-passed)+' нарушение(й) зафиксировано автоматически.' : 'Нарушений нет.'}`);
@@ -2487,126 +2162,6 @@ async function confirmFix(id){
   v.status = 'устранено';
   v._fixing = false;
   showBanner('Нарушение отмечено устранённым — ожидает подтверждения управляющего.');
-}
-
-// ---------- УПРАВЛЯЮЩИЙ ----------
-
-function renderManager(){
-  const point = pointById(state.myPointId);
-  const myInspections = state.inspections.filter(i=>i.pointId===state.myPointId);
-  const myViolations = state.violations.filter(v=>v.pointId===state.myPointId);
-  const openCount = myViolations.filter(v=>v.status!=='закрыто').length;
-  const rating = computeObjectRating(point.id);
-
-  return `
-    <div class="page-title">Дашборд точки</div>
-    <div class="page-subtitle">${point.name} (${point.region}) · роль: Управляющий мойки</div>
-    ${bannerHtml()}
-    <div class="grid-cols cols-3">
-      <div class="stat"><div class="num">${rating===null?'—':rating+'%'}</div><div class="label">Текущий рейтинг точки</div></div>
-      <div class="stat"><div class="num">${myInspections.length}</div><div class="label">Проверок за период</div></div>
-      <div class="stat"><div class="num">${openCount}</div><div class="label">Открытых нарушений</div></div>
-    </div>
-
-    <div class="card">
-      <h3>Нарушения по точке</h3>
-      ${myViolations.length===0 ? `<div class="empty-state">Нарушений нет.</div>` : `
-      <table>
-        <tr><th>Пункт</th><th>Критичность</th><th>Ответственный</th><th>Срок</th><th>Статус</th><th></th></tr>
-        ${myViolations.map(v=>`
-          <tr>
-            <td>${v.item}</td>
-            <td>${v.critical?'<span class="badge badge-danger">критично</span>':'<span class="badge badge-neutral">обычное</span>'}</td>
-            <td>${v.assignee}</td>
-            <td>${v.deadline}</td>
-            <td>${statusBadge(v.status)}</td>
-            <td>${managerActionCell(v)}</td>
-          </tr>
-        `).join('')}
-      </table>`}
-    </div>
-
-    <div class="card">
-      <h3>История проверок точки</h3>
-      <table>
-        <tr><th>Дата</th><th>Тип</th><th>Проверяющий</th><th>Балл</th></tr>
-        ${myInspections.map(i=>`
-          <tr><td>${i.date}</td><td>${i.kind}</td><td>${i.inspector}</td><td>${scoreBadge(i.score)}</td></tr>
-        `).join('')}
-      </table>
-      <div style="margin-top:14px;">
-        <button class="btn btn-secondary" onclick="showBanner('В демо-версии экспорт не реализован — в MVP выгрузка в Excel/PDF.')">Скачать отчёт по точке</button>
-      </div>
-    </div>
-  `;
-}
-
-function managerActionCell(v){
-  if(v.status==='новое'){
-    if(v._assigning){
-      const sortedUsers = [...state.users].sort((a,b)=>a.name.localeCompare(b.name));
-      return `
-        <div style="display:flex;flex-direction:column;gap:4px;min-width:170px;">
-          <select onchange="setViolationAssignField(${v.id},'UserId',this.value)">
-            <option value="">Ответственный…</option>
-            ${sortedUsers.map(u=>`<option value="${u.id}" ${v._assignUserId===u.id?'selected':''}>${u.name} (${u.role})</option>`).join('')}
-          </select>
-          <input type="date" data-quiet-render="1" value="${v._assignDeadline||''}" onchange="setViolationAssignField(${v.id},'Deadline',this.value)">
-          <div style="display:flex;gap:4px;">
-            <button class="btn btn-sm" onclick="submitAssignViolation(${v.id})">Назначить</button>
-            <button class="btn btn-sm btn-secondary" onclick="assignViolation(${v.id})">Отмена</button>
-          </div>
-        </div>
-      `;
-    }
-    return `<button class="btn btn-sm" onclick="assignViolation(${v.id})">Назначить</button>`;
-  }
-  if(v.status==='устранено'){
-    return `<button class="btn btn-sm" onclick="closeViolation(${v.id})">Закрыть</button>`;
-  }
-  return '—';
-}
-
-function assignViolation(id){
-  const v = state.violations.find(v=>v.id===id);
-  v._assigning = !v._assigning;
-  render();
-}
-
-function setViolationAssignField(id, field, value){
-  const v = state.violations.find(v=>v.id===id);
-  v['_assign'+field] = field==='UserId' ? (value===''?null:Number(value)) : value;
-  render();
-}
-
-async function submitAssignViolation(id){
-  const v = state.violations.find(v=>v.id===id);
-  if(!v._assignUserId){ showBanner('Выберите ответственного.'); return; }
-  if(!v._assignDeadline){ showBanner('Укажите срок устранения.'); return; }
-  const assignee = state.users.find(u=>u.id===v._assignUserId);
-  const assigneeName = assignee ? assignee.name : '—';
-  const deadline = v._assignDeadline;
-
-  if(state.live && sb){
-    try{
-      const { error } = await sbRetry(()=> sb.from('violations').update({assignee: assigneeName, deadline, status:'в работе'}).eq('id', id));
-      if(error) throw error;
-    } catch(e){ showBanner('Не удалось сохранить назначение: ' + (e.message||e)); return; }
-  }
-  v.assignee = assigneeName; v.deadline = deadline; v.status = 'в работе'; v._assigning = false;
-  showBanner('Ответственный назначен, срок устранения — '+deadline+'.');
-}
-
-async function closeViolation(id){
-  const v = state.violations.find(v=>v.id===id);
-  if(state.live && sb){
-    try{
-      const { error } = await sbRetry(()=> sb.from('violations').update({status:'закрыто'}).eq('id', id));
-      if(error) throw error;
-    } catch(e){ showBanner('Не удалось сохранить: ' + (e.message||e)); return; }
-  }
-  v.status = 'закрыто';
-  showBanner('Нарушение проверено и закрыто.');
 }
 
 // ---------- ТЕРРИТОРИАЛЬНЫЙ ДИРЕКТОР ----------
@@ -2687,51 +2242,6 @@ function renderTrendSection(pts, from, to){
         <tr><th>Точка</th><th>${hasPeriod ? 'Баллы за период (по датам)' : 'Последние баллы (по датам)'}</th><th>Тренд</th></tr>
         ${typesPresent.map(typeSection).join('')}
       </table>`}
-    </div>
-  `;
-}
-
-function renderDirector(){
-  const active = state.points.filter(p=>p.status==='действующая');
-  const escalations = state.violations.filter(v=> v.critical || v.status==='просрочено');
-  const guestInspections = state.inspections.filter(i=>i.kind==='Тайный покупатель');
-
-  return `
-    <div class="page-title">Сводный дашборд региона</div>
-    <div class="page-subtitle">Роль: территориальный директор · видны все точки закреплённых регионов</div>
-    ${bannerHtml()}
-    <div class="card">
-      <h3>Рейтинг точек <span class="muted">(конвейеры, роботы и МСО сравниваются раздельно — сравнивать их между собой некорректно)</span></h3>
-      ${state.pointTypes.map(type=>renderRatingGroup(active, type)).join('')}
-    </div>
-
-    ${renderTrendSection()}
-
-    <div class="card">
-      <h3>Эскалации <span class="muted">(критические и просроченные нарушения по всем точкам)</span></h3>
-      ${escalations.length===0 ? `<div class="empty-state">Эскалаций нет.</div>` : `
-      <table>
-        <tr><th>Точка</th><th>Нарушение</th><th>Статус</th><th>Ответственный</th><th>Срок</th></tr>
-        ${escalations.map(v=>`
-          <tr>
-            <td>${pointById(v.pointId).name}</td>
-            <td>${v.item}</td>
-            <td>${statusBadge(v.status)}</td>
-            <td>${v.assignee}</td>
-            <td>${v.deadline}</td>
-          </tr>
-        `).join('')}
-      </table>`}
-    </div>
-
-    <div class="card">
-      <h3>Результаты гостевых проверок (тайный покупатель)</h3>
-      <table>
-        <tr><th>Точка</th><th>Дата</th><th>Балл</th></tr>
-        ${guestInspections.map(i=>`
-          <tr><td>${pointById(i.pointId).name}</td><td>${i.date}</td><td>${scoreBadge(i.score)}</td></tr>
-        `).join('')}
-      </table>
     </div>
   `;
 }
@@ -2989,7 +2499,7 @@ function renderInspectionDetail(insp){
         </label>` : ''}
       </div>
       ${items.length===0
-        ? '<div class="empty-state">Детальный состав чек-листа для этой проверки не сохранён (демо-запись без шаблона).</div>'
+        ? '<div class="empty-state">Детальный состав чек-листа для этой проверки не сохранён.</div>'
         : visibleItems.length===0
           ? '<div class="empty-state">Нарушений нет — все пункты выполнены.</div>'
           : visibleItems.map(it=>{
@@ -3267,11 +2777,11 @@ async function completePlanInspection(planId){
   }
 
   const newId = Math.max(0, ...state.inspections.map(i=>i.id))+1;
-  const inspection = { id:newId, pointId:plan.pointId, templateId:plan.templateId, kind:t.type, date:ANALYTICS_TODAY, score, inspector };
+  const inspection = { id:newId, pointId:plan.pointId, templateId:plan.templateId, kind:t.type, date:todayStr(), score, inspector };
   inspection.items = synthesizeInspectionItems(t, p, score, newId*47+11);
   state.inspections.push(inspection);
   plan.history = plan.history || [];
-  plan.history.push({date:ANALYTICS_TODAY, score, inspectionId:newId});
+  plan.history.push({date:todayStr(), score, inspectionId:newId});
 
   if(plan.recurrence){
     // повторяющаяся проверка: цикл продолжается — считаем срок СЛЕДУЮЩЕЙ проверки от плановой даты
@@ -4256,7 +3766,7 @@ function renderAdminPoints(){
       </div>
     </div>
 
-    <div class="page-subtitle" style="margin-top:-8px">Реестр точек сети — сгруппирован по типу мойки, т.к. рейтинг и сравнение считаются только внутри одного типа. Показано ${filtered.length} из ${state.points.length} точек в демо. Нажмите на строку, чтобы изменить объект.</div>
+    <div class="page-subtitle" style="margin-top:-8px">Реестр точек сети — сгруппирован по типу мойки, т.к. рейтинг и сравнение считаются только внутри одного типа. Показано ${filtered.length} из ${state.points.length} точек. Нажмите на строку, чтобы изменить объект.</div>
     ${state.pointTypes.map(type=>renderPointsTable(type, filtered)).join('')}
   `;
 }
@@ -5057,7 +4567,7 @@ async function submitGuest(){
 
   const newId = Math.max(0,...state.inspections.map(i=>i.id))+1;
   state.inspections.unshift({
-    id:newId, pointId:point.id, templateId:t.id, kind:'Тайный покупатель', date:ANALYTICS_TODAY,
+    id:newId, pointId:point.id, templateId:t.id, kind:'Тайный покупатель', date:todayStr(),
     score, inspector:'Гость: '+name, guestName:name, guestContact:contact,
     items: itemsPayload
   });
@@ -5083,7 +4593,7 @@ function renderFixPanels(){
   return fixing.map(v=>`
     <div class="card" style="border-color:var(--warning)">
       <h3>Устранение: ${v.item}</h3>
-      <div class="photo-btn attached" style="margin-bottom:12px">📷 Фото «после» прикреплено (демо)</div>
+      <div class="photo-btn attached" style="margin-bottom:12px">📷 Прикрепление фото «после» ещё не реализовано</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn" onclick="confirmFix(${v.id})">Подтвердить устранение</button>
         <button class="btn btn-secondary" onclick="fixViolation(${v.id})">Отмена</button>
@@ -5096,10 +4606,8 @@ function renderFixPanels(){
 
 function renderPreviewShell(inner, role){
   const exitLink = state.live
-    ? `<a onclick="goChangePassword()">Сменить пароль</a> · <a onclick="doLogout()">← Выйти из рабочего режима</a>`
-    : state.guestLive
-      ? `<a onclick="exitPreview()">← Завершить (это была реальная проверка)</a>`
-      : `<a onclick="exitPreview()">← Выйти из демо-просмотра (в кабинет управления)</a>`;
+    ? `<a onclick="goChangePassword()">Сменить пароль</a> · <a onclick="doLogout()">← Выйти</a>`
+    : `<a onclick="exitPreview()">← Завершить проверку</a>`;
 
   if(role==='operator'){
     return `
@@ -5108,7 +4616,7 @@ function renderPreviewShell(inner, role){
         <div class="kiosk-sub">Рабочий телефон точки · чек-листы приходят по расписанию</div>
       </div>
       <div class="kiosk-content">${inner}</div>
-      <div class="kiosk-demo-toggle">${exitLink}</div>
+      <div class="kiosk-exit">${exitLink}</div>
     `;
   }
 
@@ -5121,17 +4629,7 @@ function renderPreviewShell(inner, role){
     `;
   }
 
-  // Управляющий / территориальный директор — черновые экраны, ещё не переведённые на телефон
-  const roleLabel = role==='manager' ? 'Управляющий мойки' : 'Терр. директор';
-  return `
-    <div class="app">
-      <aside class="sidebar" style="width:220px;">
-        <h1 style="font-size:14px;color:#fff;margin:0 0 4px 0;">${roleLabel}</h1>
-        <div class="nav-note" style="display:block;margin-top:12px;">${exitLink}<br><br>Черновой десктоп-дашборд — по плану будет переведён на телефон, как у оператора.</div>
-      </aside>
-      <main class="content">${inner}</main>
-    </div>
-  `;
+  return '';   // других ролей на телефоне нет: оператор и гостевая проверка
 }
 
 // ---------- Меню сотрудника (кружок в правом верхнем углу) ----------
@@ -5188,25 +4686,6 @@ function renderShellFull(inner){
         </div>
         <div class="subtitle">Сервис управления проверками</div>
         <nav id="roleNav">${renderConsoleNav()}</nav>
-        ${state.live ? `` : PILOT_ONLY ? `` : `
-        <div class="nav-note">Кликабельный демо-макет на тестовых данных — без реальной базы и сервера.</div>
-        <div class="console-demo-links">
-          <b style="color:#f0f0f0;">Демо-просмотр телефонных экранов:</b><br>
-          <a onclick="enterDemo('operator')">Оператор мойки</a> ·
-          <a onclick="enterDemo('guest')">Гостевая проверка</a>
-          <br><br>
-          <span style="opacity:.7;">Черновые экраны (пока не на телефоне):</span><br>
-          <a onclick="enterDemo('manager')">Управляющий</a> ·
-          <a onclick="enterDemo('director')">Терр. директор</a>
-          ${DEMO_ONLY ? `` : `
-          <br><br>
-          <b style="color:#f0f0f0;">Реальный пилот (пишет в общую базу):</b><br>
-          <a onclick="goLiveLogin()">Рабочий вход (логин/пароль)</a><br>
-          <a onclick="goRegister()">Регистрация сотрудника (первый вход)</a><br>
-          <a onclick="openLiveGuestChecklist()">Гостевая проверка — реальная</a>
-          `}
-        </div>
-        `}
       </aside>
       <main class="content">${inner}</main>
     </div>
@@ -5311,8 +4790,6 @@ function performRender(){
     let inner = '';
     if(state.previewRole==='operator') inner = renderOperator() + renderFixPanels();
     else if(state.previewRole==='guest') inner = renderGuest();
-    else if(state.previewRole==='manager') inner = renderManager();
-    else if(state.previewRole==='director') inner = renderDirector();
     root.innerHTML = renderPreviewShell(inner, state.previewRole);
   } else {
     root.innerHTML = renderShellFull(renderConsoleSection());
@@ -5340,7 +4817,7 @@ function performRender(){
 // Восстановление ранее выполненного входа при загрузке страницы. Пока идёт проверка, вместо формы
 // входа показывается заглушка — иначе у уже авторизованного сотрудника экран логина мелькал бы.
 async function restoreSessionOnStart(){
-  if(!PILOT_ONLY || !sb){ state.authRestoring = false; return; }
+  if(!sb){ state.authRestoring = false; return; }
   try{
     const { data } = await sb.auth.getSession();
     const session = data && data.session;
@@ -5363,6 +4840,6 @@ async function restoreSessionOnStart(){
   render();
 }
 
-state.authRestoring = PILOT_ONLY && !!sb;   // до окончания проверки форму входа не показываем
+state.authRestoring = !!sb;   // до окончания проверки форму входа не показываем
 render();
 restoreSessionOnStart();
