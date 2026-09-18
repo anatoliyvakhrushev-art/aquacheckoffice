@@ -127,10 +127,15 @@ let state = {
   plannedInspections: []
 };
 
-// ==================== Supabase (реальный бэкенд для рабочего пилота) ====================
-// Вход по логину/паролю и гостевая проверка пишут в этот проект.
-const SUPABASE_URL = 'https://koctgpwqcmytungdgfdu.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtvY3RncHdxY215dHVuZ2RnZmR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQxODgwMTYsImV4cCI6MjA5OTc2NDAxNn0.Lb02a3T2YXrKmoaWQ4vyAN5mgGrllCKaeZikmkeiRSk';
+// ==================== Бэкенд (свой сервер, не облако) ====================
+// 18.09.2026 переехали с облачного Supabase на собственный сервер 80.90.187.240:
+// база, авторизация и хранилище фотографий работают там же, где отдаётся сайт.
+// Причина переезда — бесплатный тариф облака усыплял проект после недели простоя,
+// и сам проект жил в личном аккаунте подрядчика.
+// Адрес совпадает с адресом сайта: API доступно путями /auth/v1, /rest/v1, /storage/v1
+// через nginx — поэтому не нужен отдельный сертификат и нет междоменных запросов.
+const SUPABASE_URL = 'https://checkoffice.aquagizer.ru';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg5NzEzMjQ1LCJleHAiOjIxMDUwNzMyNDV9.EFCh4PSaLVwxHDXlvliRZm2CU536FaApV4FfMMDA8FY';
 const sb = (window.supabase) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 // После выхода из учётной записи данные сети остаются в памяти страницы до перезагрузки.
 // Их нужно вычистить явно: иначе следующий сотрудник, войдя на том же устройстве, до
